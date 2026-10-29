@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """色块控件。
 
-- ``CurrentColorSwatch``：面板常驻的**当前色小色块**（24×24、1px 边框），放在数值行 HEX 框右边；
+- ``CurrentColorSwatch``：颜色行中可伸展的当前色块，高度与 HEX 输入框一致；
 - ``ColorSwatchWidget``：旧的三色块（当前/前景/背景），面板已不再使用，保留备用。
 
 色块颜色均为实时值（不是点击前快照）。
@@ -90,15 +90,14 @@ class ColorSwatchWidget(QWidget):
         event.ignore()
 
 
-CUR_MIN_W = 24      # 当前色小色块最小宽度（宽度自适应、吃满数值行右侧余量）
+CUR_MIN_W = 24      # 控件默认最小宽度；面板按颜色行的可用空间伸展
 CUR_H = 24          # 当前色小色块初始高度（面板随后按 HEX 框高度校正）
 
 
 class CurrentColorSwatch(QWidget):
-    """当前选色小色块：**宽度自适应**（吃满数值行右侧余量）、高度与 HEX 数值框一致。
+    """颜色行左侧的当前色块：宽度自适应，高度与 HEX 输入框一致。
 
-    面板把它放在数值行 HEX 数值框右边（那一行右侧的留白），替代旧的三色块控件；
-    点一下复制其 HEX。
+    点一下复制当前颜色的 HEX。
     """
 
     def __init__(self, parent=None):

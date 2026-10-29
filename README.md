@@ -20,6 +20,8 @@
 
 ![插件面板总览](pykrita/hsv_picker/manual/images/01-overview.png)
 
+下面的操作示意图保留了旧版布局；当前界面将“当前色块 / HEX / 设置”与 H/S/V 数值分成两行，留出边距，不再把所有控件挤在一排。
+
 打开方式有两种：
 
 - Docker 面板：Krita 菜单 **设置 → 面板列表 → 馍馍拾色器**。
@@ -73,8 +75,8 @@
 - 四条横向色条左边是 0，按住左键拖动即可改该条的分量。
 - 数值框单击编辑文本，可输入或粘贴；H / S / V 三个框还可以按住左键上下拖动连续调值。
 - H / S / V 拖动倍率：默认 ×1、`Ctrl` ×2、`Ctrl+Shift` ×4、`Alt` ×0.5。
-- H / S / V 三个框等宽，面板变窄时一起收缩；文本**始终完整**（H/S/V 两位小数、HEX `#RRGGBB`），不会自动变成 1 位 / 整数，也不显示省略号。宽度不足时框内改为左对齐、显示停在文本开头（优先看到整数部分），放得下时恢复右对齐。
-- 宽度足够显示全部数字后，这些框不再继续变宽，多出来的宽度留给 HEX 右边的当前色块。
+- 当前色块、完整 HEX 输入和设置图标独立成行；H / S / V 在下一行均分空间，保持两位小数。
+- 数值框按原生字体和主题测量最小宽度；放大字体时扩大必要的最小尺寸，不靠裁字或减少小数位来挤进窄面板。
 - 单击即可编辑完整数值；HEX 与 L / C / a / b 数值框只能输入和粘贴，不能拖动调值。
 
 ### 默认键位与自定义按键表
@@ -139,11 +141,11 @@
 图是 HEX 数值框、当前色块与历史色块的局部拼合（实际像素）；真实界面里历史就是单列。
 
 - 点击历史列里的色块即可取用。
-- 点击 HEX 数值框右侧的色块，复制当前颜色的 `#RRGGBB`。
+- 点击颜色行左侧的当前色块，复制当前颜色的 `#RRGGBB`。
 
 ### 设置菜单
 
-数值行最左边的「设置」按钮里集中了面板的显示、彩度、明度、浮层和弹窗选项。
+颜色行右侧的设置图标集中了面板的显示、彩度、明度、浮层和弹窗选项。
 
 ![设置菜单与三个子菜单](pykrita/hsv_picker/manual/images/09-settings.png)
 
@@ -396,6 +398,8 @@ Use it like an ordinary HSV picker, or work in Oklab/Oklch mode.
 
 ![Panel overview](pykrita/hsv_picker/manual/images/01-overview.png)
 
+The operation illustrations below retain the earlier layout. The current UI separates the current-color swatch / HEX / Settings row from the evenly spaced HSV row, with padding instead of squeezing every control onto one line.
+
 Open it in two ways:
 
 - Docker panel: Krita menu **Settings → Dockers → Momo Color Picker**.
@@ -453,7 +457,7 @@ The image is a 2× integer enlargement of the real interface, so the row labels 
 - The four horizontal strips have 0 at the left; hold the left button and drag to change that component.
 - Click a value field to edit its text, or type and paste into it; the H / S / V fields can also be adjusted by holding the left button and dragging vertically.
 - Drag multipliers for H / S / V: 1× by default, 2× with `Ctrl`, 4× with `Ctrl+Shift`, 0.5× with `Alt`.
-- The H / S / V fields share one width and shrink together as the panel narrows, but their text always stays complete (two decimals for H / S / V, the full `#RRGGBB` for HEX): no dynamic decimals and no ellipsis. When a field is too narrow it switches to left alignment and stays at the beginning of the text (the integer part is visible first); it returns to right alignment once the full text fits. Once the fields fit all their digits they stop growing; the extra width goes to the current-color swatch on the right.
+- Current color, the complete HEX input and the Settings icon have their own row. H / S / V share the row below, keep two decimal places and expand evenly. Minimum widths follow the native font and style; larger fonts increase the necessary minimum size instead of clipping values or dropping decimals.
 - Click any field to edit the complete value. The HEX and L / C / a / b fields only accept typing and pasting; they cannot be drag-adjusted.
 
 #### Default keys + custom key table
@@ -518,11 +522,11 @@ The history column brings back recently used colors, and the current-color swatc
 The image is a composite of the HEX field, the current-color swatch and the history column at actual pixels; in the real interface the history is a single column.
 
 - Click a swatch in the history column to pick that color.
-- Click the swatch to the right of the HEX field to copy the current `#RRGGBB`.
+- Click the current-color swatch at the left of the color row to copy `#RRGGBB`.
 
 #### Settings menu
 
-The Settings button at the far left of the value row gathers the panel's display, chroma, lightness, overlay and popup options.
+The Settings icon at the right of the color row gathers the panel's display, chroma, lightness, overlay and popup options.
 
 ![Settings menu with its three submenus](pykrita/hsv_picker/manual/images/09-settings.png)
 

@@ -33,6 +33,8 @@ The supported deployment for this Qt6 port is Linux through the repository's Nix
 - Shortcut matching reads the current Krita action, including shortcut changes made during the session, without stealing text input.
 - Removed the obsolete Windows NumPy vendor tree. Linux diagnostic logs use `XDG_STATE_HOME` (default `~/.local/state`), with `HSV_PICKER_DEBUG_LOG` still available as an override.
 - Source archives and Nix plugin packages include the GPL license; source releases no longer bundle platform-specific NumPy binaries.
+- Grouped dock controls: current-color swatch, HEX and native Settings icon have a dedicated row; H/S/V share a second row. Content padding and consistent strip spacing replace the crowded single-row layout. Minimum sizes follow native font/style metrics, including runtime font changes; the popup's default height now follows actual control height instead of a fixed aspect ratio.
+  Layout verification exercised 300/375/600 logical-pixel dock widths at 1.25 device scaling, then enlarged the native font by 25%. All fields remained inside the padded content area with complete values; a/b visibility, HEX submission, tab navigation, settings-menu display, popup layout and shutdown were exercised in Krita.
 
 1. Run `nix run .#install-plugin` once (use `path:.#install-plugin` for an untracked checkout). It installs user data links and registers a persistent Nix GC root; it does not start Krita.
 2. Start your existing Krita from the application menu or with `krita`. Enable the plugin in Python Plugin Manager and restart. `nix develop` provides the development/test environment.

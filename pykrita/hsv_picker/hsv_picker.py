@@ -17,7 +17,7 @@ from PyQt6.QtCore import QEvent, QObject, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QActionGroup, QColor, QGuiApplication
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLabel,
                              QLineEdit, QMenu, QMessageBox, QStyle, QStyleOptionFrame, QToolButton,
-                             QSizeGrip, QVBoxLayout, QWidget)
+                             QSizeGrip, QSizePolicy, QVBoxLayout, QWidget)
 from krita import (DockWidget, DockWidgetFactory, DockWidgetFactoryBase,
                    Extension, Krita, ManagedColor)
 
@@ -77,7 +77,6 @@ TEMP_CHROMA_KEY_KEY = "HsvPickerTempChromaKey"       # 临时切换键（MOD_ID�
 LIGHTNESS_METRIC_KEY = "HsvPickerLightnessMetric"    # 明度标准：oklab（默认）/ gray
 POPUP_SIZE_USER_KEY = "HsvPickerPopupSizeUser"       # 用户手动调整过的弹窗尺寸
 POPUP_SIZE_LEGACY_KEY = "HsvPickerPopupSize"         # T-40 前的旧尺寸键（程序化尺寸也会写入，已废弃不读）
-POPUP_FILL_ASPECT = 1.278     # 默认高 = 宽 × 该比例：拾色器方块填满宽度且无纵向空白（实测 493→630）
 PREVIEW_MODES = ("off", "1s", "2s", "hover", "always")
 LIGHTNESS_METRICS = ("oklab", "gray")                 # 明度标准可选值
 PREVIEW_DEFAULT_MODE = "hover"
@@ -337,17 +336,22 @@ class HsvPickerPanel(QWidget):
         self._strip_ab_gray_iv = None   # gray 口径：本分量「目标灰阶可达」区间缓存
         self._strip_active = False      # 色条拖动中（跨面板同步隔离用）
         self._suppress_until = 0.0      # 写入/同步后短窗口内，画布上与当前色差 ≤1 的变化视为回声
-        # T-49/T-51 数值行自适应：固定宽度开销、布局递归 guard（文本始终完整，无动态小数）
-        self._entry_row_fixed = None
-        self._layout_entry_guard = False
         self.h = 0.0
         self.s = 1.0
         self.v = 1.0
         self._status = QLabel(self)     # 仅用于内部错误提示；必须隐藏，否则会飘在面板左上角
         self._status.hide()
-        root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(3)
+        # Krita normalizes a docker's outer margins. Keep our padding inside
+        # a content widget rather than competing with the dock host.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        content = QWidget(self)
+        root = QVBoxLayout(content)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
+        self._content_layout = root
+        outer.addWidget(content)
         self._build_ui(root)
         self._sync_entries()
         self.history_listeners = []     # 跨面板同步：历史变化时回调
@@ -392,12 +396,15 @@ class HsvPickerPanel(QWidget):
         self.history = history_widget.HistoryWidget(self.mid_box, on_pick=self._on_history_pick)
         root.addWidget(self.mid_box, 1)
 
-        # 3) 设置按钮（二级菜单；与数值行同一排、位于最左侧）
+        # Native settings icon keeps the color row usable in narrow dockers.
         self.btn_menu = QToolButton(self)
         self.btn_menu.setText(i18n.t("设置", "Settings"))
+        self.btn_menu.setAccessibleName(self.btn_menu.text())
+        self.btn_menu.setIcon(Krita.instance().icon("configure"))
+        self.btn_menu.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.btn_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.btn_menu.setToolTip(i18n.t("显示选项：明度/彩度线簇与过点线",
-                                        "Display options: clusters and through-lines"))
+        self.btn_menu.setToolTip(i18n.t("设置：显示、拾色和按键选项",
+                                      "Settings: display, picking and shortcuts"))
         self.menu = QMenu(self.btn_menu)
         self.act_clusters = QAction(i18n.t("显示明度/彩度线簇", "Show lightness/chroma cluster lines"), self.menu)
         self.act_clusters.setCheckable(True)
@@ -626,48 +633,45 @@ class HsvPickerPanel(QWidget):
         self.menu.addAction(self.act_about)
         self.btn_menu.setMenu(self.menu)
 
-        # 4) 数值行：设置按钮 + H / S / V（可拖动调值）+ HEX + 当前色小色块，同一排
-        # T-49：四框宽度按面板宽度自适应（H/S/V 等宽、2→1→0 位小数；HEX 优先完整）。
-        data_row = QHBoxLayout()
-        data_row.setSpacing(4)
-        data_row.addWidget(self.btn_menu)
-        data_row.addSpacing(6)
+        # Separate color identity from numeric editing instead of squeezing
+        # settings, HSV and HEX into one row.
         self.edit_h = self._make_entry(DragValueEdit, "0.00", 58, (0.0, 360.0), 0.2, True, "h")
         self.edit_s = self._make_entry(DragValueEdit, "100.00", 60, (0.0, 100.0), 0.2, False, "s")
         self.edit_v = self._make_entry(DragValueEdit, "100.00", 60, (0.0, 100.0), 0.2, False, "v")
-        # 构造时先按字体实测兜底（padding=8，不裁字）：H 最宽 "359.99"、S/V 最宽 "100.00"。
-        self.edit_h.setFixedWidth(self._entry_width(self.edit_h, "359.99", 58, 8))
-        self.edit_s.setFixedWidth(self._entry_width(self.edit_s, "100.00", 60, 8))
-        self.edit_v.setFixedWidth(self._entry_width(self.edit_v, "100.00", 60, 8))
-        self.edit_hex = self._make_entry(QLineEdit, "#FF0000", self._entry_width(
-            self.edit_v, "#RRGGBB", 88, 26))
-        self._entry_labels = {}
-        for label, edit in (("H", self.edit_h), ("S", self.edit_s),
-                            ("V", self.edit_v), ("HEX", self.edit_hex)):
-            lbl = QLabel(label, self)
-            data_row.addWidget(lbl)
-            self._entry_labels[label] = lbl
-            data_row.addWidget(edit)
-            data_row.addSpacing(6)
-        self._data_row = data_row
-        # 当前色小色块：放在 HEX 数值框右边、**吃满该行右侧余量**（旧的 48px 三色块已移除）
+        self.edit_hex = self._make_entry(QLineEdit, "#FF0000", 88)
+        self.edit_hex.setAccessibleName("HEX")
         self.swatch_cur = swatch_widget.CurrentColorSwatch(self)
+        self.swatch_cur.setMinimumWidth(40)
         self.swatch_cur.sync_height(self.edit_hex.sizeHint().height())
-        data_row.addWidget(self.swatch_cur, 1)
-        root.addLayout(data_row)
-        # T-49 字体实测上限（+8 余量）与行内固定开销在构造时量一次；resize 时按可用宽分配。
-        self._w_hsv_full = max(self._entry_width(self.edit_h, "359.99", 0, 8),
-                               self._entry_width(self.edit_h, "100.00", 0, 8))
-        self._w_hsv_1 = max(self._entry_width(self.edit_h, "359.9", 0, 8),
-                            self._entry_width(self.edit_h, "100.0", 0, 8))
-        self._w_hsv_0 = max(self._entry_width(self.edit_h, "360", 0, 8),
-                            self._entry_width(self.edit_h, "100", 0, 8))
-        self._w_hex_full = self._entry_width(self.edit_hex, "#RRGGBB", 0, 8)
-        self._w_hex_min = self._entry_width(self.edit_hex, "#RRR", 0, 8)
+        self._entry_labels = {"HEX": QLabel("HEX", self)}
+        self._entry_labels["HEX"].setBuddy(self.edit_hex)
+        color_row = QHBoxLayout()
+        color_row.setSpacing(8)
+        color_row.addWidget(self.swatch_cur, 1)
+        color_row.addWidget(self._entry_labels["HEX"])
+        color_row.addWidget(self.edit_hex)
+        color_row.addWidget(self.btn_menu)
+        root.addLayout(color_row)
+
+        hsv_row = QHBoxLayout()
+        hsv_row.setSpacing(12)
+        label_width = max(self.fontMetrics().horizontalAdvance(text) for text in ("H", "S", "V")) + 2
+        for text, edit in (("H", self.edit_h), ("S", self.edit_s), ("V", self.edit_v)):
+            label = QLabel(text, self)
+            label.setFixedWidth(label_width)
+            label.setBuddy(edit)
+            edit.setAccessibleName(text)
+            self._entry_labels[text] = label
+            field = QHBoxLayout()
+            field.setSpacing(6)
+            field.addWidget(label)
+            field.addWidget(edit, 1)
+            hsv_row.addLayout(field, 1)
+        root.addLayout(hsv_row)
 
         # 5) 两条横向色条（左 0）：明度条 + 彩度条，各带数值框
         self.strip_l_row = QHBoxLayout()
-        self.strip_l_row.setSpacing(4)
+        self.strip_l_row.setSpacing(8)
         self.strip_l = strip_widget.LightnessStrip(
             self, on_changed=self._on_strip_lightness, metric=self.lightness_metric,
             on_press=self._on_strip_l_press, on_release=self._on_strip_release)
@@ -688,7 +692,7 @@ class HsvPickerPanel(QWidget):
         root.addLayout(self.strip_l_row)
 
         self.strip_c_row = QHBoxLayout()
-        self.strip_c_row.setSpacing(4)
+        self.strip_c_row.setSpacing(8)
         self.strip_c = strip_widget.ChromaStrip(
             self, on_changed=self._on_strip_chroma,
             on_press=self._on_strip_c_press, on_release=self._on_strip_release)
@@ -706,7 +710,7 @@ class HsvPickerPanel(QWidget):
 
         # 6) Oklab a / b 分量条（默认显示；设置菜单可收起）
         self.strip_a_row = QHBoxLayout()
-        self.strip_a_row.setSpacing(4)
+        self.strip_a_row.setSpacing(8)
         self.strip_a = strip_widget.AbStrip(
             self, axis="a", mode=self.ab_mode,
             on_changed=lambda v: self._on_strip_ab("a", v),
@@ -724,7 +728,7 @@ class HsvPickerPanel(QWidget):
         root.addLayout(self.strip_a_row)
 
         self.strip_b_row = QHBoxLayout()
-        self.strip_b_row.setSpacing(4)
+        self.strip_b_row.setSpacing(8)
         self.strip_b = strip_widget.AbStrip(
             self, axis="b", mode=self.ab_mode,
             on_changed=lambda v: self._on_strip_ab("b", v),
@@ -740,12 +744,15 @@ class HsvPickerPanel(QWidget):
         self.strip_b_row.addWidget(self.strip_b, 1)
         self.strip_b_row.addWidget(self.edit_b)
         root.addLayout(self.strip_b_row)
-        self._measure_entry_row()       # T-49：行内固定开销只量一次
         self._layout_entry_widths()
         self._apply_ab_visible()
         self._apply_chroma_label()
         self._apply_lightness_metric()
         self._apply_keymap()          # 把自定义按键表灌进四条色条与三个可拖动数值框
+        tab_order = (self.edit_hex, self.btn_menu, self.edit_h, self.edit_s, self.edit_v,
+                     self.edit_l, self.edit_c, self.edit_a, self.edit_b)
+        for previous, current in zip(tab_order, tab_order[1:]):
+            QWidget.setTabOrder(previous, current)
         # 首帧预算：预览浮层首次 show 要付 Qt 建原生窗口的一次性成本（本机 ~4ms）。
         # 它不属于 gray 可达区间，却会落进「首次拖动帧」；这里在面板构造时把原生
         # 窗口预创建掉（winId 不显示窗口、不抢焦点、观感与行为不变），首帧只付刷新。
@@ -763,7 +770,7 @@ class HsvPickerPanel(QWidget):
         return lbl
 
     def resizeEvent(self, event):
-        self._layout_entry_widths()
+        self._update_entry_alignments()
         self._layout_picker()
         self._sync_swatch_height()
         super().resizeEvent(event)
@@ -793,7 +800,13 @@ class HsvPickerPanel(QWidget):
         # 布局在每次尺寸变化后都要重算中间区（拾色器居中 + 历史列等高）
         from PyQt6.QtCore import QEvent
         if ev.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Resize):
+            self._update_panel_minimum()
             self._layout_picker()
+        if ev.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange) and hasattr(self, "edit_b"):
+            # Child fonts are inherited after the parent's change event.
+            QTimer.singleShot(0, self._layout_entry_widths)
+        if ev.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange) and hasattr(self, "btn_menu"):
+            self.btn_menu.setIcon(Krita.instance().icon("configure"))
         return super().event(ev)
 
     def _layout_picker(self):
@@ -841,74 +854,38 @@ class HsvPickerPanel(QWidget):
         return max(int(minimum), advance + self._entry_decoration_width(widget) + int(padding))
 
     def _entry_widgets(self):
-        """数值行四个框（H/S/V/HEX）：布局与焦点处理共用。"""
+        """颜色行及 HSV 行的输入框，共用字体测量与对齐逻辑。"""
         return (self.edit_h, self.edit_s, self.edit_v, self.edit_hex)
 
-    def _entry_panel_width(self):
-        """面板分给数值行的可用内容宽（扣掉根布局左右边距）。"""
-        w = max(1, int(self.width()))
-        lay = self.layout()
-        if lay is not None:
-            m = lay.contentsMargins()
-            w -= m.left() + m.right()
-        return max(1, w)
-
-    def _measure_entry_row(self):
-        """行内固定开销 = data_row.sizeHint() − 四个数值框当前宽度和（构造时量一次）。"""
-        row = getattr(self, "_data_row", None)
-        if row is None:
+    def _update_panel_minimum(self):
+        layout = self.layout()
+        if layout is None:
             return
-        try:
-            cur = sum(int(w.width()) for w in self._entry_widgets())
-            self._entry_row_fixed = max(0, int(row.sizeHint().width()) - cur)
-        except Exception:
-            self._entry_row_fixed = 0
+        minimum = layout.minimumSize()
+        self.setMinimumSize(max(300, minimum.width()), max(430, minimum.height()))
 
     def _layout_entry_widths(self):
-        """T-49/T-51：按可用宽分配 H/S/V/HEX 宽度；H/S/V 等宽、文本始终完整。
-
-        宽度规则沿用 T-49 骨架（够宽取上限不再变宽；不够先保 HEX 完整、H/S/V 等分；
-        再不够 H/S/V 保整数宽、HEX 收缩）。文本不再动态降小数，宽度不足时由
-        `_update_entry_alignments()` 改成左对齐并停在开头。
-        """
-        if getattr(self, "_layout_entry_guard", False):
+        """Let Qt distribute the HSV row; never trade away complete values."""
+        if not _alive(self) or not _alive(getattr(self, "edit_b", None)):
             return
-        edits = self._entry_widgets()
-        if any(not _alive(w) for w in edits):
-            return
-        if self._entry_row_fixed is None:
-            self._measure_entry_row()
-        avail = self._entry_panel_width() - int(self._entry_row_fixed or 0)
-        wf, w1, w0 = self._w_hsv_full, self._w_hsv_1, self._w_hsv_0
-        xh, xm = self._w_hex_full, self._w_hex_min
-        if avail >= 3 * wf + xh:
-            w_hsv, w_hex = wf, xh               # 够宽：四框都取上限，余量全部给色块
-        else:
-            w_hex = xh                          # 先保 HEX 完整
-            share = (avail - xh) / 3.0
-            if share >= w0:
-                w_hsv = int(min(wf, max(w0, share)))
-            else:
-                w_hsv = w0                      # 再不够：H/S/V 保整数宽，HEX 收缩
-                w_hex = int(max(xm, min(xh, avail - 3 * w_hsv)))
-        changed = (int(self.edit_hex.width()) != int(w_hex)
-                   or any(int(w.width()) != int(w_hsv)
-                          for w in (self.edit_h, self.edit_s, self.edit_v)))
-        self._layout_entry_guard = True
-        try:
-            for w in (self.edit_h, self.edit_s, self.edit_v):
-                if int(w.width()) != int(w_hsv):
-                    w.setFixedWidth(int(w_hsv))
-            if int(self.edit_hex.width()) != int(w_hex):
-                self.edit_hex.setFixedWidth(int(w_hex))
-            if changed:
-                self._sync_entries()
-            self._update_entry_alignments()
-        finally:
-            self._layout_entry_guard = False
+        full = max(self._entry_width(self.edit_h, sample, 58, 6)
+                   for sample in ("359.99", "100.00"))
+        label_width = max(self.fontMetrics().horizontalAdvance(text) for text in ("H", "S", "V")) + 2
+        for text, edit in (("H", self.edit_h), ("S", self.edit_s), ("V", self.edit_v)):
+            self._entry_labels[text].setFixedWidth(label_width)
+            edit.setMinimumWidth(full)
+        self.edit_hex.setFixedWidth(self._entry_width(self.edit_hex, "#RRGGBB", 88, 6))
+        component_width = self._entry_width(self.edit_l, "-0.0000", 64, 6)
+        for edit in (self.edit_l, self.edit_c, self.edit_a, self.edit_b):
+            edit.setFixedWidth(component_width)
+        self._update_entry_alignments()
+        self._sync_swatch_height()
+        self._update_panel_minimum()
 
     def _update_entry_alignments(self):
         """T-51：文本始终完整；框宽不足时左对齐并停在开头（优先整数），够宽恢复右对齐。"""
+        if not _alive(getattr(self, "edit_hex", None)):
+            return
         for edit in self._entry_widgets():
             if not _alive(edit):
                 continue
@@ -933,7 +910,8 @@ class HsvPickerPanel(QWidget):
             edit.kind = kind
         else:
             edit = cls(text, self)
-        edit.setFixedWidth(width)
+        edit.setMinimumWidth(width)
+        edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         edit.setAlignment(Qt.AlignmentFlag.AlignRight)
         edit.editingFinished.connect(self._on_entry_commit)
         return edit
@@ -3246,8 +3224,7 @@ class HsvPickerPopup(QWidget):
     def _default_size(self):
         """首次打开且无用户记忆时的尺寸 = 面板 sizeHint；不足时补到硬最小尺寸，再 clamp 到屏幕。
 
-        高度按 POPUP_FILL_ASPECT 放大，让拾色器方块填满面板宽度：否则方块只占中间一小块，
-        左右会留下大片空白。
+        根据色环可用宽度和下方控件的实际最小高度计算，不使用固定宽高比。
         """
         hint = self.panel.sizeHint()
         min_hint = self.panel.minimumSizeHint()
@@ -3255,7 +3232,11 @@ class HsvPickerPopup(QWidget):
         h = max(int(hint.height()), int(min_hint.height()), int(self.panel.minimumHeight()))
         if w <= 0 or h <= 0:
             w, h = 300, 430      # 极端兜底：面板 hint 完全无效时给一个可用尺寸
-        h = max(h, int(round(w * POPUP_FILL_ASPECT)))
+        margins = self.panel._content_layout.contentsMargins()
+        picker_width = w - margins.left() - margins.right() - self.panel.history.width() - 6
+        controls_height = min_hint.height() - self.panel.mid_box.minimumHeight()
+        footer_height = max(0, self.layout().minimumSize().height() - min_hint.height())
+        h = max(h, picker_width + controls_height + footer_height)
         return self._clamp_size_to_screen(w, h)
 
     def _read_user_size(self):

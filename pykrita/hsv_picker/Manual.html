@@ -48,6 +48,7 @@
 <h3 id="_2">面板总览</h3>
 <p>既可以像普通 HSV 拾色器一样使用，也可以按 Oklab/Oklch 模式操作。</p>
 <p><img alt="插件面板总览" src="manual/images/01-overview.png"></p>
+<p>操作示意图保留旧版布局。当前界面将“当前色块 / HEX / 设置”独立成行，下方 H/S/V 均分一行，避免在窄 Docker 中挤成一排。</p>
 <p>打开方式有两种：</p>
 <ul>
 <li>Docker 面板：Krita 菜单 <strong>设置 → 面板列表 → 馍馍拾色器</strong>。</li>
@@ -91,8 +92,8 @@
 <li>四条横向色条左边是 0，按住左键拖动即可改该条的分量。</li>
 <li>数值框单击编辑文本，可输入或粘贴；H / S / V 三个框还可以按住左键上下拖动连续调值。</li>
 <li>H / S / V 拖动倍率：默认 ×1、<code>Ctrl</code> ×2、<code>Ctrl+Shift</code> ×4、<code>Alt</code> ×0.5。</li>
-<li>H / S / V 三个框等宽，面板变窄时一起收缩；文本<strong>始终完整</strong>（H/S/V 两位小数、HEX <code>#RRGGBB</code>），不会自动变成 1 位 / 整数，也不显示省略号。宽度不足时框内改为左对齐、显示停在文本开头（优先看到整数部分），放得下时恢复右对齐。</li>
-<li>宽度足够显示全部数字后，这些框不再继续变宽，多出来的宽度留给 HEX 右边的当前色块。</li>
+<li>当前色块、完整 HEX 输入和设置图标独立成行；H / S / V 在下一行均分空间，保持两位小数。</li>
+<li>数值框按原生字体和主题测量最小宽度；放大字体时扩大必要的最小尺寸，不靠裁字或减少小数位来挤进窄面板。</li>
 <li>单击即可编辑完整数值；HEX 与 L / C / a / b 数值框只能输入和粘贴，不能拖动调值。</li>
 </ul>
 <h3 id="_5">默认键位与自定义按键表</h3>
@@ -163,10 +164,10 @@
 <p>图是 HEX 数值框、当前色块与历史色块的局部拼合（实际像素）；真实界面里历史就是单列。</p>
 <ul>
 <li>点击历史列里的色块即可取用。</li>
-<li>点击 HEX 数值框右侧的色块，复制当前颜色的 <code>#RRGGBB</code>。</li>
+<li>点击颜色行左侧的当前色块，复制当前颜色的 <code>#RRGGBB</code>。</li>
 </ul>
 <h3 id="_9">设置菜单</h3>
-<p>数值行最左边的「设置」按钮里集中了面板的显示、彩度、明度、浮层和弹窗选项。</p>
+<p>颜色行右侧的设置图标集中了面板的显示、彩度、明度、浮层和弹窗选项。</p>
 <p><img alt="设置菜单与三个子菜单" src="manual/images/09-settings.png"></p>
 <p>点击「设置」按钮展开菜单，逐项打开或切换。图中三个子菜单都已展开：C 条选项 = 相对 / 绝对口径、绝对 C 线簇、临时切换键；明度标准 = Oklab L（默认）/ 灰阶；浮层选项 = 关闭 / 1 秒 / 2 秒 / 悬停（默认）/ 一直。</p>
 <p>所有设置立即生效；Docker 面板与弹窗共享同一份设置。</p>
@@ -437,6 +438,7 @@
 <h4 id="panel-overview">Panel overview</h4>
 <p>Use it like an ordinary HSV picker, or work in Oklab/Oklch mode.</p>
 <p><img alt="Panel overview" src="manual/images/01-overview.png"></p>
+<p>The illustrations retain the earlier layout. The current UI separates the current-color swatch / HEX / Settings row from the evenly spaced HSV row, with padding rather than squeezing every control onto one line.</p>
 <p>Open it in two ways:</p>
 <ul>
 <li>Docker panel: Krita menu <strong>Settings → Dockers → Momo Color Picker</strong>.</li>
@@ -482,7 +484,7 @@
 <li>The four horizontal strips have 0 at the left; hold the left button and drag to change that component.</li>
 <li>Click a value field to edit its text, or type and paste into it; the H / S / V fields can also be adjusted by holding the left button and dragging vertically.</li>
 <li>Drag multipliers for H / S / V: 1× by default, 2× with <code>Ctrl</code>, 4× with <code>Ctrl+Shift</code>, 0.5× with <code>Alt</code>.</li>
-<li>The H / S / V fields share one width and shrink together as the panel narrows, but their text always stays complete (two decimals for H / S / V, the full <code>#RRGGBB</code> for HEX): no dynamic decimals and no ellipsis. When a field is too narrow it switches to left alignment and stays at the beginning of the text (the integer part is visible first); it returns to right alignment once the full text fits. Once the fields fit all their digits they stop growing; the extra width goes to the current-color swatch on the right.</li>
+<li>Current color, the complete HEX input and the Settings icon have their own row. H / S / V share the row below, retain two decimals and expand evenly. Minimum widths follow the native font and style; larger fonts increase the necessary minimum size instead of clipping values or dropping decimals.</li>
 <li>Click any field to edit the complete value. The HEX and L / C / a / b fields only accept typing and pasting; they cannot be drag-adjusted.</li>
 </ul>
 <h4 id="default-keys-custom-key-table">Default keys + custom key table</h4>
@@ -553,10 +555,10 @@ An exact configured input row wins; no auto flip.</p>
 <p>The image is a composite of the HEX field, the current-color swatch and the history column at actual pixels; in the real interface the history is a single column.</p>
 <ul>
 <li>Click a swatch in the history column to pick that color.</li>
-<li>Click the swatch to the right of the HEX field to copy the current <code>#RRGGBB</code>.</li>
+<li>Click the current-color swatch at the left of the color row to copy <code>#RRGGBB</code>.</li>
 </ul>
 <h4 id="settings-menu">Settings menu</h4>
-<p>The Settings button at the far left of the value row gathers the panel's display, chroma, lightness, overlay and popup options.</p>
+<p>The Settings icon at the right of the color row gathers the panel's display, chroma, lightness, overlay and popup options.</p>
 <p><img alt="Settings menu with its three submenus" src="manual/images/09-settings.png"></p>
 <p>Click Settings to open the menu, then turn items on or switch between them. The image shows all three submenus expanded: C strip options = Relative / Absolute, absolute C clusters, temporary switch key; Lightness standard = Oklab L (perceptual, default) / Grayscale (soft proof); Overlay options = Off / 1 second / 2 seconds / Hover (default) / Always.</p>
 <p>Every setting takes effect immediately, and the Docker panel and the popup share the same settings.</p>
