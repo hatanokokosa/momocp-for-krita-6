@@ -1,15 +1,13 @@
-"""Build the platform-neutral Momo Color Picker source archive.
+"""Build the Linux/Krita6 Momo Color Picker source archive.
 
 Usage::
 
     python tools/build_release_zip.py [--version 2.0.0] [--out dist]
 
 The archive contains the Qt6/Krita6 plugin source, desktop descriptor, action
-file, manual, and installation notes.  It deliberately does *not* contain the
-Windows NumPy wheel checked into older release branches: native extension
-binaries are not portable between Krita builds or operating systems.  Linux
-users can install the Nix plugin package once; it supplies private NumPy from
-the matching nixpkgs Python set without changing how Krita is launched.
+file, manual, and installation notes. It contains no native NumPy runtime:
+Linux users can install the Nix plugin package once, or provide matching NumPy
+in Krita's Python environment, without changing how Krita is launched.
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PKG_REL = Path("pykrita") / "hsv_picker"
 DESKTOP_REL = Path("pykrita") / "hsv_picker.desktop"
-INSTALL_FILES = ("install.bat", "install.txt", "LICENSE")
+INSTALL_FILES = ("install.txt", "LICENSE")
 SKIP_DIRS = {"__pycache__", "vendor", "_python_dependencies"}
 SKIP_SUFFIX = (".pyc", ".pyo")
 
@@ -130,7 +128,6 @@ def main(argv=None) -> int:
         expected = {
             "hsv_picker",
             "hsv_picker.desktop",
-            "install.bat",
             "install.txt",
             "LICENSE",
         }

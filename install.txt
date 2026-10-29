@@ -1,6 +1,8 @@
 ﻿Momo Color Picker — installation guide (v2.0.0)
 ================================================================
 
+Supported deployment: Linux/Nix with Krita 6 (Qt6).
+
 Nix installation (ordinary installed Krita)
   1. Install Nix with flakes enabled, then clone this repository.
   2. Run once from the repository root: nix run .#install-plugin
@@ -25,8 +27,8 @@ with regular Krita only when Krita's Python comes from that same nixpkgs
 revision; no PyQt binding is installed by this plugin.
 
 Source archive
-  MomoColorPicker-<version>-krita6-source.zip is platform-neutral source and
-  contains no NumPy. It requires the host Krita Python to provide an
+  MomoColorPicker-<version>-krita6-source.zip contains Linux/Krita6 plugin
+  source without NumPy. It requires the host Krita Python to provide an
   ABI-compatible NumPy; the Nix package above supplies private NumPy instead.
 
 Uninstall (Nix)
@@ -34,10 +36,6 @@ Uninstall (Nix)
   installer's exact user-data links and registered GC root; unrelated files
   and Krita settings are untouched. Removing the checkout does not uninstall
   the plugin; updating the package through the installer updates all links.
-
-Windows status
-  install.bat remains a source-file copier. NumPy discovery and Krita 6 on
-  Windows are unverified; do not copy a NumPy build from another runtime.
 
 License
   This plugin: GPL-3.0-or-later (full text in LICENSE).

@@ -241,7 +241,7 @@
 </tr>
 <tr>
 <td>诊断日志</td>
-<td>默认关；排查问题时打开；Linux 默认写入 <code>~/krita/hsv_picker_debug.log</code>，Windows 写入 <code>%APPDATA%\krita\hsv_picker_debug.log</code>，每次启动 Krita 自动关闭</td>
+<td>默认关；排查问题时打开；写入 <code>$XDG_STATE_HOME/krita/hsv_picker_debug.log</code>（默认 <code>~/.local/state/krita/hsv_picker_debug.log</code>），可用 <code>HSV_PICKER_DEBUG_LOG</code> 覆盖；每次启动 Krita 自动关闭</td>
 </tr>
 <tr>
 <td>关于馍馍拾色器</td>
@@ -301,7 +301,7 @@
 <ul>
 <li><strong>支持的部署</strong>：Linux + Nix flake + nixpkgs Krita <strong>6.0.4.1</strong>（Qt6）。flake 目标为 <code>x86_64-linux</code> / <code>aarch64-linux</code>；aarch64 仅表示可求值，不表示已测试。</li>
 <li>Nix 插件包提供匹配的私有 NumPy，无需专用 Krita 启动器或 sudo pip。</li>
-<li><strong>Windows</strong>：<code>install.bat</code> 仅复制源文件；Krita 6 与 NumPy 发现尚未验证，不作兼容性承诺。</li>
+<li><strong>Windows</strong>：不支持；不再提供安装脚本或兼容路径。</li>
 <li>Krita 5.x 不在此 Qt6 版本的支持范围内。</li>
 </ul>
 <p>已实测：NixOS x86_64、KDE 原生 Wayland 与 XWayland（Qt xcb 后端），Krita 6.0.4.1 / Python 3.14.8 / NumPy 2.5.3。验证包含拾色输入、颜色同步、弹窗和预览、快捷键重设、外点关闭、文档切换与主窗口退出；Wayland 还验证了缩放及宿主边界。实际多显示器硬件未验收。</p>
@@ -325,7 +325,7 @@
 </li>
 <li>
 <p><strong>为什么插件包不再内置 numpy？</strong>
-   平台无关源码 ZIP 不带原生 NumPy；Nix 安装包关联匹配的私有 NumPy，普通 Krita 直接加载，不再复制旧版 Windows 二进制。</p>
+   Linux 源码 ZIP 不带原生 NumPy；Nix 安装包关联匹配的私有 NumPy，普通 Krita 直接加载。</p>
 </li>
 <li>
 <p><strong><code>Shift+B</code> 和别的功能冲突怎么办？</strong>
@@ -633,7 +633,7 @@ An exact configured input row wins; no auto flip.</p>
 </tr>
 <tr>
 <td>Diagnostic log</td>
-<td>Off by default; turn it on when troubleshooting; Linux defaults to <code>~/krita/hsv_picker_debug.log</code>, Windows to <code>%APPDATA%\krita\hsv_picker_debug.log</code>, and it turns itself off on every Krita start</td>
+<td>Off by default; writes to <code>$XDG_STATE_HOME/krita/hsv_picker_debug.log</code> (default <code>~/.local/state/krita/hsv_picker_debug.log</code>), with <code>HSV_PICKER_DEBUG_LOG</code> as an override; disabled on every Krita start</td>
 </tr>
 <tr>
 <td>About Momo Color Picker</td>
@@ -693,7 +693,7 @@ An exact configured input row wins; no auto flip.</p>
 <ul>
 <li><strong>Supported deployment:</strong> Linux + Nix flake + nixpkgs Krita <strong>6.0.4.1</strong> (Qt6). The flake targets <code>x86_64-linux</code> / <code>aarch64-linux</code>; aarch64 is evaluable, not claimed tested.</li>
 <li>The Nix plugin package supplies compatible private NumPy; no Krita startup launcher or sudo pip is required.</li>
-<li><strong>Windows:</strong> <code>install.bat</code> only copies source files; Krita 6 and NumPy discovery there are unverified and no compatibility claim is made.</li>
+<li><strong>Windows:</strong> Unsupported; no installer or compatibility paths are maintained.</li>
 <li>Krita 5.x is outside this Qt6 release's support scope.</li>
 </ul>
 <p>Verified on NixOS x86_64, KDE native Wayland and XWayland (Qt xcb), with Krita 6.0.4.1 / Python 3.14.8 / NumPy 2.5.3. GUI checks covered color input/synchronization, popup/preview, shortcut reassignment, outside clicks, document switching and shutdown; Wayland also passed resize/bounds checks. Physical multi-monitor hardware was not tested.</p>

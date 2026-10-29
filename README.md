@@ -1,3 +1,5 @@
+注：由于原版本未做 Krita 6 兼容打算，此版为我个人使用的 fork，且完全由 AI 负责维护。仅保证支持 NixOS + Qt6，并打算完全移除 Windows/MacOS 支持。纯自用项目，不接受贡献，若有需要欢迎自行 fork
+
 # 馍馍拾色器：更适合HSV宝宝的Oklab/Oklch拾色器
 
 [English ↓](#english)
@@ -170,7 +172,7 @@
 | 点击弹出面板外时自动关闭 | 默认开；关掉后点击画布不会关闭弹窗 |
 | 弹出面板置顶 | 默认开；自动关闭开着时置灰 |
 | 弹出位置跟随鼠标 | 默认开；超出 Krita 主窗口时自动贴边 |
-| 诊断日志 | 默认关；排查问题时打开；Linux 默认写入 `~/krita/hsv_picker_debug.log`，Windows 写入 `%APPDATA%\krita\hsv_picker_debug.log`，每次启动 Krita 自动关闭 |
+| 诊断日志 | 默认关；排查问题时打开；写入 `$XDG_STATE_HOME/krita/hsv_picker_debug.log`（默认 `~/.local/state/krita/hsv_picker_debug.log`），可用 `HSV_PICKER_DEBUG_LOG` 覆盖；每次启动 Krita 自动关闭 |
 | 关于馍馍拾色器 | 版本、许可与第三方信息 |
 
 ### 明度标准：Oklab L / 灰阶
@@ -249,7 +251,7 @@ Nix 包在插件目录提供私有 `_python_dependencies` symlink，指向锁定
 
 - **支持的部署**：Linux + Nix flake + nixpkgs Krita **6.0.4.1**（Qt6）。flake 目标为 `x86_64-linux` / `aarch64-linux`；aarch64 仅表示可求值，不表示已测试。
 - Nix 插件包提供私有 NumPy，导入后移除临时搜索路径；不需要专用启动器，也不要求 sudo pip。
-- **Windows**：`install.bat` 仅复制源文件；Krita 6 与 NumPy 发现尚未验证，不作兼容性承诺。
+- **Windows**：不支持；不再提供安装脚本或兼容路径。
 - Krita 5.x 不在此 Qt6 版本的支持范围内。
 
 已实测：NixOS `x86_64-linux`、KDE 原生 Wayland 与 XWayland（Qt `xcb` 后端），Krita 6.0.4.1 / Python 3.14.8 / NumPy 2.5.3。使用 Nix 打包后的插件验证了前景色双向同步、色环/SV/色条输入、弹窗与预览、快捷键重设、外点关闭、文档切换和主窗口退出；Wayland 还验证了拖动缩放及宿主缩小时不覆盖用户尺寸记忆。多屏负坐标仅做几何检查，未做实际多显示器硬件验收。
@@ -279,7 +281,7 @@ nix develop --command env QT_QPA_PLATFORM=offscreen python -m unittest discover 
    灰阶标准锁的是灰阶值；a、b 改变时，要让灰阶严格不变，Oklab L 就必须跟着变。想锁 Oklab L，把 **设置 → 明度标准** 切回 Oklab L。
 
 5. **为什么插件包不再内置 numpy？**
-   旧发布包里的 Windows NumPy 原生扩展不能用于 Linux 或其他 Krita/Python 构建。平台无关源码 ZIP 不带 NumPy；Nix 安装包关联匹配的私有 NumPy，普通 Krita 直接加载。
+   NumPy 原生扩展必须匹配宿主 Python ABI。Linux 源码 ZIP 不带 NumPy；Nix 安装包关联匹配的私有 NumPy，普通 Krita 直接加载。
 
 6. **`Shift+B` 和别的功能冲突怎么办？**
    打开 **设置 → 配置 Krita → 快捷键 → 脚本 →「Show Momo Color Picker」**，改成别的组合即可；插件跟随这个快捷键，`Shift+B` 只是默认值。
@@ -554,7 +556,7 @@ Every setting takes effect immediately, and the Docker panel and the popup share
 | Auto-close popup when clicking outside | On by default; when off, clicking the canvas does not close the popup |
 | Keep popup always on top | On by default; greyed out while auto-close is on |
 | Popup at mouse position | On by default; clamps back inside the Krita main window when it would overflow |
-| Diagnostic log | Off by default; turn it on when troubleshooting; Linux defaults to `~/krita/hsv_picker_debug.log`, Windows to `%APPDATA%\krita\hsv_picker_debug.log`, and it turns itself off on every Krita start |
+| Diagnostic log | Off by default; writes to `$XDG_STATE_HOME/krita/hsv_picker_debug.log` (default `~/.local/state/krita/hsv_picker_debug.log`), with `HSV_PICKER_DEBUG_LOG` as an override; disabled on every Krita start |
 | About Momo Color Picker | Version, license and third-party notices |
 
 #### Lightness standard: Oklab L / Grayscale
@@ -646,7 +648,7 @@ the host to provide an ABI-compatible NumPy.
 
 - **Supported deployment:** Linux + Nix flake + nixpkgs Krita **6.0.4.1** (Qt6). The flake targets `x86_64-linux` / `aarch64-linux`; aarch64 is evaluable, not claimed tested.
 - The Nix plugin package supplies private NumPy and removes its temporary import path afterwards; no Krita launcher or `sudo pip` is needed.
-- **Windows:** `install.bat` only copies source files; Krita 6 and NumPy discovery there are unverified and no compatibility claim is made.
+- **Windows:** Unsupported; no installer or compatibility paths are maintained.
 - Krita 5.x is outside this Qt6 release's support scope.
 
 Verified on NixOS `x86_64-linux`, KDE native Wayland and XWayland (Qt `xcb`), with Krita 6.0.4.1 / Python 3.14.8 / NumPy 2.5.3. The packaged plugin was exercised for foreground round trips, ring/SV/strip input, popup/preview rendering, shortcut reassignment, outside clicks, document transitions and main-window shutdown. Wayland also passed grip resizing and host-resize bounds without overwriting the user's remembered size. Negative multi-screen coordinates were checked geometrically, not on physical multi-monitor hardware.
@@ -767,4 +769,3 @@ nix develop --command env QT_QPA_PLATFORM=offscreen python -m unittest discover 
 - Repository: <https://github.com/hatanokokosa/momocp-for-krita-6>
 - Releases: <https://github.com/hatanokokosa/momocp-for-krita-6/releases>
 - Upstream: <https://github.com/zmom0/momo-color-picker>
-

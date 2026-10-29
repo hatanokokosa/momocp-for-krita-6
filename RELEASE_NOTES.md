@@ -6,6 +6,16 @@ Momo Color Picker is an Oklab/Oklch-aware color picker plugin for Krita. It keep
 
 *The illustration uses the historical layout; 2.0.0 groups color and HSV controls into separate rows.*
 
+## Unreleased — Linux-only cleanup
+
+Verification: Ruff checks/formatting and all six regressions passed. The Linux source ZIP preserves Krita's importer layout and GPL/action files without Windows installers or native binaries; the Nix package built successfully. Ordinary Krita on native Wayland exercised the diagnostic menu, actual XDG tooltip, action-triggered log writes, disable/shutdown, and ignored APPDATA. HOME fallback and the explicit log-path override were also checked.
+
+- Removed the Windows installer and its source-archive entries.
+- Removed APPDATA-based logging and obsolete Windows/bundled-runtime Git attributes. Text files now use LF.
+- Diagnostic tooltips and documentation use the actual Linux XDG log path, including the explicit log-path override.
+- Linux Wayland/XWayland behavior and the already published v2.0.0 tag and assets are unchanged.
+
+
 ## Changes in 2.0.0 — Krita 6 / Qt6
 
 **Breaking release:** Krita 6 / Qt6 is required; Krita 5 is no longer supported. The obsolete Windows NumPy bundle is not included. Linux/Nix is the verified deployment; Windows remains unverified.
@@ -58,7 +68,7 @@ Release packaging verification checked the embedded 2.0.0 version, GPL license, 
 
 ## Historical Windows package status
 
-The 1.1.0 Windows/Krita 5.3 package and its bundled NumPy 2.3.0 are historical release artifacts. The current Qt6 source archive does not include that Windows-only native binary. `install.bat` is retained as a source-file copier, but Krita 6 on Windows and NumPy discovery there are unverified; no Windows compatibility claim is made.
+The 1.1.0 Windows/Krita 5.3 package and its bundled NumPy 2.3.0 are historical release artifacts. The published 2.0.0 source archive still contained a Windows source-file copier; the current main branch no longer includes that installer or Windows compatibility paths. Only Linux/Nix deployment is maintained.
 
 ## Highlights
 
@@ -71,18 +81,6 @@ The 1.1.0 Windows/Krita 5.3 package and its bundled NumPy 2.3.0 are historical r
 - **Color history and HEX swatch** — click a history entry to reuse it; click the current color swatch to copy its HEX code.
 - **Fully customizable keymap** — 8 modifier combinations × left/middle/right button per area (ring, square, strips, numeric fields), editable in a table and persisted immediately.
 - **Bilingual manual** — Simplified Chinese and English manual generated from one source, opened from the plugin's Manual button.
-
-## Historical 1.1.0 Windows installation
-
-The original 1.1.0 Windows release was installed as follows:
-
-1. Download `MomoColorPicker-1.1.0-win64-krita5.3.zip` from the historical Release assets.
-2. In Krita, open **Tools → Scripts → Import Python Plugin From File...** and select the zip.
-3. When Krita offers to restart, choose **Yes**; then restart Krita.
-4. In **Settings → Configure Krita → Python Plugin Manager**, enable **Momo Color Picker** and restart it once more.
-5. Open it from **Settings → Dockers → Momo Color Picker**, or press `Shift+B`.
-
-This historical package bundled NumPy 2.3.0 for its tested Krita 5.3 / Python 3.13 environment. That binary is not reused by the Krita 6 port.
 
 ## License and third-party components
 
@@ -102,4 +100,4 @@ This historical package bundled NumPy 2.3.0 for its tested Krita 5.3 / Python 3.
 
 移植内容：Qt6 原生 API 与按键组合；Wayland 宿主内可缩放浮窗和鼠标穿透预览；KDE Breeze 输入框内容区测量，避免数值首位被裁；运行时快捷键更新；保留原有插件 ID、动作 ID 和设置键。旧 Windows NumPy vendor 已移除，Linux 诊断日志遵循 `XDG_STATE_HOME`（默认 `~/.local/state`）。
 
-旧 Windows 包 `MomoColorPicker-1.1.0-win64-krita5.3.zip` 与其中的 NumPy 2.3.0 属于历史发布物。当前 `install.bat` 只复制源文件，Krita 6 Windows 与 NumPy 发现尚未验证，不作兼容性承诺。
+旧 Windows 包 `MomoColorPicker-1.1.0-win64-krita5.3.zip` 与其中的 NumPy 2.3.0 属于历史发布物；已发布的 v2.0.0 源码包仍含 Windows 文件复制脚本。当前 main 已删除 Windows 安装入口和日志兼容路径，仅维护 Linux/Nix 部署；不会改写已有标签或发布资产。

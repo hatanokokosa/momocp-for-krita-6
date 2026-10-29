@@ -25,14 +25,11 @@ _SESSION_STARTED = False  # 本进程是否已开启过日志（第一次开启�
 
 
 def default_path():
-    """日志路径：显式覆盖、Windows APPDATA 或 Linux XDG_STATE_HOME。"""
+    """日志路径：显式覆盖或 Linux XDG_STATE_HOME。"""
     override = os.environ.get("HSV_PICKER_DEBUG_LOG")
     if override:
         return override
-    if os.name == "nt":
-        base = os.environ.get("APPDATA") or os.path.expanduser("~")
-    else:
-        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     return os.path.join(base, "krita", "hsv_picker_debug.log")
 
 

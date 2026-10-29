@@ -739,11 +739,11 @@ class HsvPickerPanel(QWidget):
         self.act_debug.setCheckable(True)
         self.act_debug.setToolTip(
             i18n.t(
-                "开启后把交互与内部状态写入 %APPDATA%\\krita\\hsv_picker_debug.log"
+                "开启后把交互与内部状态写入 {path}"
                 "（每次启动 Krita 自动关闭；开启时覆盖上次日志）",
-                "Write interaction and internal state to %APPDATA%\\krita\\hsv_picker_debug.log"
+                "Write interaction and internal state to {path}"
                 " (off on every Krita start; enabling overwrites the previous log)",
-            )
+            ).format(path=os.path.abspath(dlog.path() or dlog.default_path()))
         )
         self.act_debug.blockSignals(True)
         self.act_debug.setChecked(self.debug_log)
