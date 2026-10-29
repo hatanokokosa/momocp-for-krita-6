@@ -3,8 +3,6 @@ __pycache__/
 *.pyc
 *.pyo
 
-# numpy is committed on this release branch so the repo ZIP imports directly
-
 # Build products and scratch files
 dist/
 tmp/

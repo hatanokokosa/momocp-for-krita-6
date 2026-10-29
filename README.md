@@ -168,7 +168,7 @@
 | 点击弹出面板外时自动关闭 | 默认开；关掉后点击画布不会关闭弹窗 |
 | 弹出面板置顶 | 默认开；自动关闭开着时置灰 |
 | 弹出位置跟随鼠标 | 默认开；超出 Krita 主窗口时自动贴边 |
-| 诊断日志 | 默认关；排查问题时打开，日志写入 `%APPDATA%\krita\hsv_picker_debug.log`，每次启动 Krita 自动关闭 |
+| 诊断日志 | 默认关；排查问题时打开；Linux 默认写入 `~/krita/hsv_picker_debug.log`，Windows 写入 `%APPDATA%\krita\hsv_picker_debug.log`，每次启动 Krita 自动关闭 |
 | 关于馍馍拾色器 | 版本、许可与第三方信息 |
 
 ### 明度标准：Oklab L / 灰阶
@@ -229,20 +229,36 @@
 
 ## 安装
 
-> 插件需要 numpy，对于 Windows11 + krita5.3.x 只需要这一个 zip，发布包已经内置 numpy，不需要另外安装。
+推荐使用仓库的 Nix flake 安装到现有的普通 Krita：
 
-1. 打开 [Releases](https://github.com/zmom0/momo-color-picker/releases)，下载最新的 `MomoColorPicker-<版本>-win64-krita5.3.zip`。
-2. 打开 Krita，点 **工具 → 脚本 → 从文件导入 Python 插件…**（`Tools > Scripts > Import Python Plugin From File...`）。
-3. 选中刚下载的 zip 文件。
-4. Krita 提示需要重启才能启用插件时，选 **Yes**。
-5. 重启 Krita，然后打开 **设置 → 面板列表 → 馍馍拾色器**，或按 `Shift+B`。
+```sh
+nix run .#install-plugin
+```
+
+先退出正在运行的 Krita。当前未跟踪工作树可以用 `nix run path:.#install-plugin`；这是一次性安装命令，不是 Krita 启动命令。
+
+该命令只在 `$XDG_DATA_HOME/krita`（默认 `~/.local/share/krita`）创建插件和 action 的安装器所有 symlink，并在 `$XDG_STATE_HOME/momo-color-picker/gcroots`（默认 `~/.local/state/...`）保留 Nix GC root。不会设置全局 `PYTHONPATH` 或 `XDG_DATA_DIRS`，也不会覆盖 Krita 配置。安装后从桌面菜单或直接运行 `krita`；不会自动启用插件。
+
+首次安装后，在 **设置 → 配置 Krita → Python 插件管理器** 启用插件，再启动普通 Krita。重复运行是幂等的；冲突的普通文件或目录会被拒绝而不会删除。`nix develop` 保留 Qt6 开发环境。
+
+Nix 包在插件目录提供私有 `_python_dependencies` symlink，指向锁定 nixpkgs 的 `python3.withPackages([numpy])`。只有使用同一 nixpkgs 的普通 Krita Python 才保证 ABI 兼容；插件不安装 PyQt。源代码 ZIP 不含 NumPy，要求宿主提供 ABI 匹配的 NumPy。
 
 ## 兼容性
 
-- **支持**：Krita **5.3.x** + **Windows**（当前实际测试环境）。
-- **其他平台**：不保证可用。想在其它平台使用，需要自行把 numpy 安装到 Krita 使用的 Python 环境；Windows 发布包内置的 numpy 不适用于其它平台。
-- Windows 发布包内置 numpy 2.3.0，不需要单独安装 Python 或 numpy。
-- Krita 5.2 及更早版本未测试。
+- **支持的部署**：Linux + Nix flake + nixpkgs Krita **6.0.4.1**（Qt6）。flake 目标为 `x86_64-linux` / `aarch64-linux`；aarch64 仅表示可求值，不表示已测试。
+- Nix 插件包提供私有 NumPy，导入后移除临时搜索路径；不需要专用启动器，也不要求 sudo pip。
+- **Windows**：`install.bat` 仅复制源文件；Krita 6 与 NumPy 发现尚未验证，不作兼容性承诺。
+- Krita 5.x 不在此 Qt6 版本的支持范围内。
+
+已实测：NixOS `x86_64-linux`、KDE 原生 Wayland 与 XWayland（Qt `xcb` 后端），Krita 6.0.4.1 / Python 3.14.8 / NumPy 2.5.3。使用 Nix 打包后的插件验证了前景色双向同步、色环/SV/色条输入、弹窗与预览、快捷键重设、外点关闭、文档切换和主窗口退出；Wayland 还验证了拖动缩放及宿主缩小时不覆盖用户尺寸记忆。多屏负坐标仅做几何检查，未做实际多显示器硬件验收。
+
+普通启动验证使用系统 `/run/current-system/sw/bin/krita`，未注入自定义 `PYTHONPATH` 或插件 `XDG_DATA_DIRS`；NumPy 从安装目录关联的私有运行时加载，导入后搜索路径恢复。安装器的升级、重复执行、Nix GC root 注册和保留用户文件的卸载均已检查。
+
+开发回归检查（NumPy、PyQt6 由开发环境提供）：
+
+```sh
+nix develop --command env QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
+```
 
 ## 常见问题（FAQ）
 
@@ -258,8 +274,8 @@
 4. **切到灰阶后拖 a、b，为什么 Oklab L 会变？**
    灰阶标准锁的是灰阶值；a、b 改变时，要让灰阶严格不变，Oklab L 就必须跟着变。想锁 Oklab L，把 **设置 → 明度标准** 切回 Oklab L。
 
-5. **为什么插件包有几十 MB？**
-   Windows 发布包内置 numpy 2.3.0（BSD-3-Clause）；Krita 内嵌的 Python 没有 numpy，内置它才能做到下载 zip、导入即可用。
+5. **为什么插件包不再内置 numpy？**
+   旧发布包里的 Windows NumPy 原生扩展不能用于 Linux 或其他 Krita/Python 构建。平台无关源码 ZIP 不带 NumPy；Nix 安装包关联匹配的私有 NumPy，普通 Krita 直接加载。
 
 6. **`Shift+B` 和别的功能冲突怎么办？**
    打开 **设置 → 配置 Krita → 快捷键 → 脚本 →「Show Momo Color Picker」**，改成别的组合即可；插件跟随这个快捷键，`Shift+B` 只是默认值。
@@ -268,7 +284,7 @@
    **设置 → 面板列表 → 馍馍拾色器**；也可以按 `Shift+B` 弹出面板。如果面板列表里没有，到 **设置 → 配置 Krita → Python 插件管理器** 确认插件已勾选，然后重启 Krita。
 
 8. **怎么卸载？**
-   **设置 → 配置 Krita → Python 插件管理器**，取消勾选「馍馍拾色器」并重启 Krita 即可停止加载；要彻底删除，再删掉 `pykrita/hsv_picker.desktop`、`pykrita/hsv_picker/` 和 `%APPDATA%\krita\actions\hsv_picker.action`。
+   **设置 → 配置 Krita → Python 插件管理器**，取消勾选「馍馍拾色器」并重启 Krita 即可停止加载；要彻底删除，Nix 部署无需删除用户配置，手动复制安装则删掉 `pykrita/hsv_picker.desktop`、`pykrita/hsv_picker/` 和对应 Krita 用户目录中的 `actions/hsv_picker.action`。
 
 ## 概念
 
@@ -351,7 +367,7 @@
 ## 许可与第三方
 
 - **本插件**：GPL-3.0-or-later
-- **numpy 2.3.0**：BSD-3-Clause。许可全文随发布包保留在 `pykrita/hsv_picker/vendor/numpy-2.3.0.dist-info/LICENSE.txt`。
+- **Nix 部署中的 NumPy**：由 pinned nixpkgs 提供，许可证与版本见 Nix store 元数据；源代码发布包不含 NumPy 二进制。
 
 ## 链接
 
@@ -531,7 +547,7 @@ Every setting takes effect immediately, and the Docker panel and the popup share
 | Auto-close popup when clicking outside | On by default; when off, clicking the canvas does not close the popup |
 | Keep popup always on top | On by default; greyed out while auto-close is on |
 | Popup at mouse position | On by default; clamps back inside the Krita main window when it would overflow |
-| Diagnostic log | Off by default; turn it on when troubleshooting; writes `%APPDATA%\krita\hsv_picker_debug.log` and turns itself off on every Krita start |
+| Diagnostic log | Off by default; turn it on when troubleshooting; Linux defaults to `~/krita/hsv_picker_debug.log`, Windows to `%APPDATA%\krita\hsv_picker_debug.log`, and it turns itself off on every Krita start |
 | About Momo Color Picker | Version, license and third-party notices |
 
 #### Lightness standard: Oklab L / Grayscale
@@ -592,20 +608,49 @@ Only the dragged component changes; lightness and the other component stay put, 
 
 ### Installation
 
-> The plugin needs numpy. On Windows 11 + Krita 5.3.x one zip is all you need: numpy is already bundled, so nothing else has to be installed.
+The supported deployment is the repository's Nix flake installed into an
+existing ordinary Krita:
 
-1. Open [Releases](https://github.com/zmom0/momo-color-picker/releases) and download the latest `MomoColorPicker-<version>-win64-krita5.3.zip`.
-2. In Krita, open **Tools → Scripts → Import Python Plugin From File...**.
-3. Select the zip file you just downloaded.
-4. When Krita says the plugin needs a restart to be enabled, choose **Yes**.
-5. Restart Krita, then open **Settings → Dockers → Momo Color Picker**, or press `Shift+B`.
+```sh
+nix run .#install-plugin
+```
+
+Close Krita before installing. For an untracked working tree use `nix run path:.#install-plugin`; this command installs the plugin once and does not launch Krita.
+
+This one-time command creates installer-owned symlinks under
+`$XDG_DATA_HOME/krita` (default `~/.local/share/krita`) and a persistent Nix
+GC root under `$XDG_STATE_HOME/momo-color-picker/gcroots` (default
+`~/.local/state/...`). It never sets global `PYTHONPATH` or `XDG_DATA_DIRS`
+and never overwrites Krita settings. Afterwards launch plain `krita` from the
+desktop menu or shell; installation does not auto-enable the plugin.
+
+Enable it once in **Settings → Configure Krita → Python Plugin Manager**, then
+use ordinary Krita. Re-running is idempotent; conflicting regular files or
+directories are refused, never deleted. `nix develop` remains the Qt6
+development environment.
+
+The Nix package provides a private `_python_dependencies` symlink to
+`python3.withPackages([numpy])` from pinned nixpkgs. ABI compatibility is
+expected only with regular Krita Python from that same nixpkgs revision; the
+plugin does not install PyQt. The source ZIP contains no NumPy and requires
+the host to provide an ABI-compatible NumPy.
 
 ### Compatibility
 
-- **Supported:** Krita **5.3.x** on **Windows** (the environment this build is tested on).
-- **Other platforms:** not guaranteed. To try them, install numpy into the Python environment used by Krita; the numpy bundled in the Windows package does not apply to other platforms.
-- The Windows package bundles numpy 2.3.0, so no separate Python or numpy install is needed.
-- Krita 5.2 and older are untested.
+- **Supported deployment:** Linux + Nix flake + nixpkgs Krita **6.0.4.1** (Qt6). The flake targets `x86_64-linux` / `aarch64-linux`; aarch64 is evaluable, not claimed tested.
+- The Nix plugin package supplies private NumPy and removes its temporary import path afterwards; no Krita launcher or `sudo pip` is needed.
+- **Windows:** `install.bat` only copies source files; Krita 6 and NumPy discovery there are unverified and no compatibility claim is made.
+- Krita 5.x is outside this Qt6 release's support scope.
+
+Verified on NixOS `x86_64-linux`, KDE native Wayland and XWayland (Qt `xcb`), with Krita 6.0.4.1 / Python 3.14.8 / NumPy 2.5.3. The packaged plugin was exercised for foreground round trips, ring/SV/strip input, popup/preview rendering, shortcut reassignment, outside clicks, document transitions and main-window shutdown. Wayland also passed grip resizing and host-resize bounds without overwriting the user's remembered size. Negative multi-screen coordinates were checked geometrically, not on physical multi-monitor hardware.
+
+The direct-install probe used the ordinary system `/run/current-system/sw/bin/krita`, without custom `PYTHONPATH` or plugin `XDG_DATA_DIRS`. NumPy loaded from the installed private runtime and the temporary search path was removed. Real installer upgrades, repeated installation, Nix GC-root registration and ownership-safe uninstall were exercised.
+
+Development regressions, using the development shell's NumPy and PyQt6:
+
+```sh
+nix develop --command env QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
+```
 
 ### FAQ
 
@@ -617,13 +662,13 @@ Only the dragged component changes; lightness and the other component stay put, 
 
 4. **Under Grayscale, why does Oklab L change when I drag a / b?** The Grayscale standard locks the gray value; to keep it exactly constant while a or b changes, Oklab L has to move. Switch **Settings → Lightness standard** back to Oklab L if you want to lock Oklab L.
 
-5. **Why is the package tens of MB?** The Windows package bundles numpy 2.3.0 (BSD-3-Clause); Krita's embedded Python has no numpy, and bundling it is what makes "download the zip, import, use" work.
+5. **Why does the source ZIP not bundle NumPy?** Native NumPy extensions are tied to a Python ABI and platform. The portable ZIP requires host NumPy; the Nix installation supplies a matching private NumPy runtime and loads in ordinary Krita.
 
 6. **What if `Shift+B` conflicts with something else?** Open **Settings → Configure Krita → Shortcuts → Scripts → "Show Momo Color Picker"** and pick another combination; the plugin follows that shortcut, and `Shift+B` is only the default.
 
 7. **Where do I find the plugin after installing it?** **Settings → Dockers → Momo Color Picker**, or press `Shift+B` to pop up the panel. If it is not in the docker list, check **Settings → Configure Krita → Python Plugin Manager**, make sure the plugin is enabled, and restart Krita.
 
-8. **How do I uninstall it?** In **Settings → Configure Krita → Python Plugin Manager**, uncheck Momo Color Picker and restart Krita to stop loading it; to remove it completely, also delete `pykrita/hsv_picker.desktop`, `pykrita/hsv_picker/` and `%APPDATA%\krita\actions\hsv_picker.action`.
+8. **How do I uninstall it?** In **Settings → Configure Krita → Python Plugin Manager**, uncheck Momo Color Picker and restart Krita to stop loading it; the Nix deployment needs no user-file cleanup, while a manual copy should remove `pykrita/hsv_picker.desktop`, `pykrita/hsv_picker/` and `actions/hsv_picker.action` from the Krita user directory.
 
 ### Concepts
 
@@ -706,7 +751,7 @@ Only the dragged component changes; lightness and the other component stay put, 
 ### License and third-party components
 
 - **This plugin:** GPL-3.0-or-later
-- **numpy 2.3.0:** BSD-3-Clause. The full license text ships in the package at `pykrita/hsv_picker/vendor/numpy-2.3.0.dist-info/LICENSE.txt`.
+- **NumPy in the Nix deployment:** supplied by pinned nixpkgs; see the Nix store's license metadata. The source archive contains no NumPy binary.
 
 ### Links
 
