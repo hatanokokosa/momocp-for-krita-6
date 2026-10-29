@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Build the platform-neutral Momo Color Picker source archive.
 
 Usage::
@@ -65,7 +64,9 @@ def main(argv=None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="构建 Krita 6 平台无关源代码 zip")
     parser.add_argument("--version", default=None, help="默认读取插件 __version__")
-    parser.add_argument("--out", default=str(ROOT / "dist"), help="输出目录（默认 dist/）")
+    parser.add_argument(
+        "--out", default=str(ROOT / "dist"), help="输出目录（默认 dist/）"
+    )
     args = parser.parse_args(argv)
 
     version = args.version or read_version()
@@ -79,10 +80,12 @@ def main(argv=None) -> int:
             shutil.copy2(ROOT / name, stage / name)
         shutil.copy2(ROOT / DESKTOP_REL, stage / "hsv_picker.desktop")
 
-        zip_path = out_dir / ("MomoColorPicker-%s-krita6-source.zip" % version)
+        zip_path = out_dir / (f"MomoColorPicker-{version}-krita6-source.zip")
         dirs = sorted(path for path in stage.rglob("*") if path.is_dir())
         files = sorted(path for path in stage.rglob("*") if path.is_file())
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        with zipfile.ZipFile(
+            zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9
+        ) as archive:
             # Krita's importer uses the top-level directory entry to locate the
             # plugin module, so retain explicit directory entries.
             for path in dirs:
@@ -111,19 +114,28 @@ def main(argv=None) -> int:
             or info.filename.startswith("hsv_picker/vendor/")
             or info.filename.startswith("hsv_picker/_python_dependencies/")
         ]
-        print("插件源码文件数 : %d" % plugin_count)
-        print("zip 路径        : %s" % zip_path)
-        print("zip 大小        : %d 字节" % zip_path.stat().st_size)
-        print("zip 条目数      : %d（文件 %d + 目录 %d）" %
-              (len(all_infos), len(infos), len(dir_infos)))
-        print("顶层结构        : %s" %
-              ", ".join("%s(%d)" % (key, value[0]) for key, value in sorted(top.items())))
+        print(f"插件源码文件数 : {plugin_count:d}")
+        print(f"zip 路径        : {zip_path}")
+        print(f"zip 大小        : {zip_path.stat().st_size:d} 字节")
+        print(
+            f"zip 条目数      : {len(all_infos):d}（文件 {len(infos):d} + 目录 {len(dir_infos):d}）"
+        )
+        print(
+            "顶层结构        : "
+            + ", ".join(f"{key}({value[0]:d})" for key, value in sorted(top.items()))
+        )
         if forbidden:
-            print("!! 不应出现的条目：%r" % forbidden[:5])
+            print(f"!! 不应出现的条目：{forbidden[:5]!r}")
             return 1
-        expected = {"hsv_picker", "hsv_picker.desktop", "install.bat", "install.txt", "LICENSE"}
+        expected = {
+            "hsv_picker",
+            "hsv_picker.desktop",
+            "install.bat",
+            "install.txt",
+            "LICENSE",
+        }
         if set(top) != expected:
-            print("!! 顶层结构不符合预期：%s" % sorted(top))
+            print(f"!! 顶层结构不符合预期：{sorted(top)}")
             return 1
     finally:
         shutil.rmtree(stage, ignore_errors=True)

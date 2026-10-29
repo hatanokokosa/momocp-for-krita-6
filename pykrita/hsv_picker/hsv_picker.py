@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """HSV 拾色器（Oklab 明度）— Krita 6 Docker 插件。
 
 结构：
@@ -8,94 +7,121 @@
 目标环境：Krita 6 / Qt6 / PyQt6；NumPy 由宿主 Python 环境提供。
 """
 
+import itertools
 import os
 import tempfile
 import time
 import traceback
-
-from PyQt6.QtCore import QEvent, QObject, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QActionGroup, QColor, QGuiApplication
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLabel,
-                             QLineEdit, QMenu, QMessageBox, QStyle, QStyleOptionFrame, QToolButton,
-                             QSizeGrip, QSizePolicy, QVBoxLayout, QWidget)
-from krita import (DockWidget, DockWidgetFactory, DockWidgetFactoryBase,
-                   Extension, Krita, ManagedColor)
+from contextlib import suppress
 
 import numpy as np
+from krita import (
+    DockWidget,
+    DockWidgetFactory,
+    DockWidgetFactoryBase,
+    Extension,
+    Krita,
+    ManagedColor,
+)
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QActionGroup, QColor, QGuiApplication
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QSizeGrip,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionFrame,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 def mc_clamp(x):
     return max(0.0, min(1.0, float(x)))
 
 
-try:                        # 插件内：包内相对导入
-    from . import __version__
+try:  # 插件内：包内相对导入
+    from . import (
+        __version__,
+        history_widget,
+        i18n,
+        keymap_core,
+        keymap_dialog,
+        math_core,
+        picker_widget,
+        preview_overlay,
+        strip_widget,
+        swatch_widget,
+    )
     from . import debug_log as dlog
-    from . import i18n
-    from . import math_core
-    from . import picker_widget
-    from . import history_widget
-    from . import keymap_core
-    from . import strip_widget
-    from . import swatch_widget
-    from . import preview_overlay
-    from . import keymap_dialog
     from .drag_edit import DragValueEdit
-except ImportError:         # 离线单测：直接把本目录加进 sys.path
+except ImportError:  # 离线单测：直接把本目录加进 sys.path
     __version__ = "1.1.0"
     import debug_log as dlog
+    import history_widget
     import i18n
+    import keymap_core
+    import keymap_dialog
     import math_core
     import picker_widget
-    import history_widget
-    import keymap_core
+    import preview_overlay
     import strip_widget
     import swatch_widget
-    import preview_overlay
-    import keymap_dialog
     from drag_edit import DragValueEdit
 
-PLUGIN_ID = "hsv_picker"          # 必须等于 .desktop 的 X-KDE-Library 与文件夹名
+PLUGIN_ID = "hsv_picker"  # 必须等于 .desktop 的 X-KDE-Library 与文件夹名
 ACTION_POPUP_ID = "hsv_picker_popup"
 ACTION_CLUSTERS_ID = "hsv_picker_show_clusters"
 ACTION_LINES_ID = "hsv_picker_show_lines"
 DEFAULT_POPUP_SHORTCUT = "Shift+B"
 HISTORY_KEY = "HsvPickerHistory"
-AUTO_CLOSE_KEY = "HsvPickerAutoClosePopup"   # 弹出面板外自动关闭（默认开）
-ON_TOP_KEY = "HsvPickerAlwaysOnTop"          # 弹出窗口置顶（默认开）
+AUTO_CLOSE_KEY = "HsvPickerAutoClosePopup"  # 弹出面板外自动关闭（默认开）
+ON_TOP_KEY = "HsvPickerAlwaysOnTop"  # 弹出窗口置顶（默认开）
 POPUP_AT_MOUSE_KEY = "HsvPickerPopupAtMouse"  # 弹出位置跟随鼠标（默认开）
-SHOW_AB_KEY = "HsvPickerShowAbStrips"        # 显示 Oklab a/b 分量条（默认开）
-STRIP_LABEL_W = 14                           # 色条符号标签宽度（L / C / a / b 左端对齐用）
-AB_MODE_KEY = "HsvPickerAbRangeMode"         # a/b 条量程口径：box（默认）/ line
-PREVIEW_MODE_KEY = "HsvPickerPreviewMode"    # 浮层选项：off / 1s / 2s / hover / always（默认 hover）
-SHOW_UNREACHABLE_KEY = "HsvPickerShowUnreachable"    # 色环「不可达色相」提示（默认开）
-KEYMAP_KEY = "HsvPickerKeymap"               # 自定义按键表（JSON；空 = 默认表）
-CHROMA_MODE_KEY = "HsvPickerChromaMode"              # C 条口径：rel（默认）/ abs
-CHROMA_FULL_KEY = "HsvPickerChromaFullRange"         # 绝对口径下 C 条满量程（默认不勾）
-CHROMA_ABS_CLUSTER_KEY = "HsvPickerChromaAbsCluster"  # 绝对 C 线簇密度：fixed（默认）/ even
-TEMP_CHROMA_KEY_KEY = "HsvPickerTempChromaKey"       # 临时切换键（MOD_ID；默认 shift）
-LIGHTNESS_METRIC_KEY = "HsvPickerLightnessMetric"    # 明度标准：oklab（默认）/ gray
-POPUP_SIZE_USER_KEY = "HsvPickerPopupSizeUser"       # 用户手动调整过的弹窗尺寸
-POPUP_SIZE_LEGACY_KEY = "HsvPickerPopupSize"         # T-40 前的旧尺寸键（程序化尺寸也会写入，已废弃不读）
+SHOW_AB_KEY = "HsvPickerShowAbStrips"  # 显示 Oklab a/b 分量条（默认开）
+STRIP_LABEL_W = 14  # 色条符号标签宽度（L / C / a / b 左端对齐用）
+AB_MODE_KEY = "HsvPickerAbRangeMode"  # a/b 条量程口径：box（默认）/ line
+PREVIEW_MODE_KEY = (
+    "HsvPickerPreviewMode"  # 浮层选项：off / 1s / 2s / hover / always（默认 hover）
+)
+SHOW_UNREACHABLE_KEY = "HsvPickerShowUnreachable"  # 色环「不可达色相」提示（默认开）
+KEYMAP_KEY = "HsvPickerKeymap"  # 自定义按键表（JSON；空 = 默认表）
+CHROMA_MODE_KEY = "HsvPickerChromaMode"  # C 条口径：rel（默认）/ abs
+CHROMA_FULL_KEY = "HsvPickerChromaFullRange"  # 绝对口径下 C 条满量程（默认不勾）
+CHROMA_ABS_CLUSTER_KEY = (
+    "HsvPickerChromaAbsCluster"  # 绝对 C 线簇密度：fixed（默认）/ even
+)
+TEMP_CHROMA_KEY_KEY = "HsvPickerTempChromaKey"  # 临时切换键（MOD_ID；默认 shift）
+LIGHTNESS_METRIC_KEY = "HsvPickerLightnessMetric"  # 明度标准：oklab（默认）/ gray
+POPUP_SIZE_USER_KEY = "HsvPickerPopupSizeUser"  # 用户手动调整过的弹窗尺寸
+POPUP_SIZE_LEGACY_KEY = (
+    "HsvPickerPopupSize"  # T-40 前的旧尺寸键（程序化尺寸也会写入，已废弃不读）
+)
 PREVIEW_MODES = ("off", "1s", "2s", "hover", "always")
-LIGHTNESS_METRICS = ("oklab", "gray")                 # 明度标准可选值
+LIGHTNESS_METRICS = ("oklab", "gray")  # 明度标准可选值
 PREVIEW_DEFAULT_MODE = "hover"
-PREVIEW_SHORT_MS = 1000                      # 「1 秒」模式的倒计时（ms）
-PREVIEW_HIDE_MS = 2000                       # 「2 秒」模式的倒计时（ms）
-PREVIEW_FOLLOW_MS = 150                      # 浮层显示期间重锚定的间隔（跟随拾色器；隐藏就停表）
-_UNSET = object()                            # 「尚未捕获」哨兵（沿用 object() 而不是 None：None 是合法取值）
+PREVIEW_SHORT_MS = 1000  # 「1 秒」模式的倒计时（ms）
+PREVIEW_HIDE_MS = 2000  # 「2 秒」模式的倒计时（ms）
+PREVIEW_FOLLOW_MS = 150  # 浮层显示期间重锚定的间隔（跟随拾色器；隐藏就停表）
+_UNSET = object()  # 「尚未捕获」哨兵（沿用 object() 而不是 None：None 是合法取值）
 
 # 调试日志（排查加载/事件问题时把 _DEBUG 打开）
 _DEBUG = False
 
 
 def _default_debug_log():
-    try:
-        base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    with suppress(NameError):
+        base = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
         if os.path.isfile(os.path.join(base, "tools", "math_selftest.py")):
             return os.path.join(base, "tmp", "hsv_picker_debug.log")
-    except NameError:
-        pass
     return os.path.join(tempfile.gettempdir(), "hsv_picker_debug.log")
 
 
@@ -108,20 +134,20 @@ def _alive(obj):
         return False
     try:
         from PyQt6 import sip
+
         return not sip.isdeleted(obj)
-    except Exception:
+    except (ImportError, RuntimeError):
         return True
 
 
 def _log(text):
     if not _DEBUG:
         return
-    try:
-        os.makedirs(os.path.dirname(_DEBUG_LOG), exist_ok=True)
-        with open(_DEBUG_LOG, "a", encoding="utf-8", newline="\n") as fh:
-            fh.write("%s\n" % (text,))
-    except Exception:
-        pass
+    with (
+        suppress(OSError, UnicodeError),
+        open(_DEBUG_LOG, "a", encoding="utf-8", newline="\n") as fh,
+    ):
+        fh.write(f"{text}\n")
 
 
 def active_view():
@@ -140,8 +166,8 @@ def read_fg_qcolor(view=None):
         return None
     try:
         return mc.colorForCanvas(view.canvas())
-    except Exception:
-        _log("read_fg_qcolor 失败:\n%s" % traceback.format_exc())
+    except RuntimeError:
+        _log(f"read_fg_qcolor 失败:\n{traceback.format_exc()}")
         return None
 
 
@@ -156,8 +182,8 @@ def write_fg_qcolor(qcolor, view=None):
             return False
         view.setForeGroundColor(mc)
         return True
-    except Exception:
-        _log("write_fg_qcolor 失败:\n%s" % traceback.format_exc())
+    except RuntimeError:
+        _log(f"write_fg_qcolor 失败:\n{traceback.format_exc()}")
         return False
 
 
@@ -180,7 +206,7 @@ def popup_position(cursor, popup_size, screen_rect, window_rect=None):
         if left <= right and top <= bottom:
             domain = (left, top, right, bottom)
         else:
-            domain = (wl, wt, wr, wb)      # 窗口与屏幕完全不相交：优先留在 Krita 窗口内
+            domain = (wl, wt, wr, wb)  # 窗口与屏幕完全不相交：优先留在 Krita 窗口内
     left, top, right, bottom = domain
     x = cx - width // 2
     y = cy - height // 2
@@ -199,147 +225,177 @@ class HsvPickerPanel(QWidget):
 
     def __init__(self, parent=None, dbg_name="panel", follow_active_view=False):
         super().__init__(parent)
-        self.follow_active_view = bool(follow_active_view)   # 弹窗为 True：始终跟随当前活动视图
-        self._supports_global_top = not QGuiApplication.platformName().startswith("wayland")
-        self.view_sinks = []                                 # 本面板视图变化时要同步的其它面板
+        self.follow_active_view = bool(
+            follow_active_view
+        )  # 弹窗为 True：始终跟随当前活动视图
+        self._supports_global_top = not QGuiApplication.platformName().startswith(
+            "wayland"
+        )
+        self.view_sinks = []  # 本面板视图变化时要同步的其它面板
         self.setMinimumWidth(300)
         self.setMinimumHeight(430)
         self._view = None
-        self._syncing = False           # 写前景色期间：忽略 Krita 的回冲信号
-        self._picking = False           # 拾色器交互中：浮层不启动倒计时（松手后才计时）
-        self._internal = False          # 本次前景色变化是不是拾色器自己写的
-        self._dirty = False             # Krita 前景色被外部改动，需要回读进拾色器
-        self.show_clusters = True       # ① 显示明度/彩度线簇（含对应标签）
-        self.show_lines = True          # ② 显示明度/彩度线
+        self._syncing = False  # 写前景色期间：忽略 Krita 的回冲信号
+        self._picking = False  # 拾色器交互中：浮层不启动倒计时（松手后才计时）
+        self._internal = False  # 本次前景色变化是不是拾色器自己写的
+        self._dirty = False  # Krita 前景色被外部改动，需要回读进拾色器
+        self.show_clusters = True  # ① 显示明度/彩度线簇（含对应标签）
+        self.show_lines = True  # ② 显示明度/彩度线
         # 诊断日志模式（T-16）：每次启动 Krita 自动关闭（不跨会话持久化）
         self.debug_log = bool(dlog.is_enabled())
-        self._dbg_ctx = "-"             # 当前颜色变更来源（写日志用）
-        self._dbg_last_l = None         # 上一条颜色记录的明度（按当前口径；跳变检测用）
-        self._dbg_name = dbg_name        # docker / popup（写日志用）
+        self._dbg_ctx = "-"  # 当前颜色变更来源（写日志用）
+        self._dbg_last_l = None  # 上一条颜色记录的明度（按当前口径；跳变检测用）
+        self._dbg_name = dbg_name  # docker / popup（写日志用）
         # 弹出面板外自动关闭（默认开；设置持久化）
         self.auto_close_popup = True
         try:
-            self.auto_close_popup = (Krita.instance().readSetting("", AUTO_CLOSE_KEY, "") or "1") != "0"
-        except Exception:
+            self.auto_close_popup = (
+                Krita.instance().readSetting("", AUTO_CLOSE_KEY, "") or "1"
+            ) != "0"
+        except RuntimeError:
             self.auto_close_popup = True
         # 弹出面板置顶（默认值照旧；设置持久化）
         self.always_on_top = True
         try:
-            self.always_on_top = (Krita.instance().readSetting("", ON_TOP_KEY, "") or "1") != "0"
-        except Exception:
+            self.always_on_top = (
+                Krita.instance().readSetting("", ON_TOP_KEY, "") or "1"
+            ) != "0"
+        except RuntimeError:
             self.always_on_top = True
         # 弹出位置跟随鼠标（默认开；设置持久化）
         self.popup_at_mouse = True
         try:
-            self.popup_at_mouse = (Krita.instance().readSetting("", POPUP_AT_MOUSE_KEY, "") or "1") != "0"
-        except Exception:
+            self.popup_at_mouse = (
+                Krita.instance().readSetting("", POPUP_AT_MOUSE_KEY, "") or "1"
+            ) != "0"
+        except RuntimeError:
             self.popup_at_mouse = True
         # 显示 Oklab a/b 分量条（默认开；设置持久化）
         self.show_ab = True
         try:
-            self.show_ab = (Krita.instance().readSetting("", SHOW_AB_KEY, "") or "1") != "0"
-        except Exception:
+            self.show_ab = (
+                Krita.instance().readSetting("", SHOW_AB_KEY, "") or "1"
+            ) != "0"
+        except RuntimeError:
             self.show_ab = True
         # a/b 条量程口径：box=当前明度切片包围盒（刻度不抖，可能有死区）/
         #                 line=单线可行区间（满量程可达）
         self.ab_mode = "box"
         try:
             self.ab_mode = Krita.instance().readSetting("", AB_MODE_KEY, "") or "box"
-        except Exception:
+        except RuntimeError:
             self.ab_mode = "box"
         if self.ab_mode not in ("box", "line"):
             self.ab_mode = "box"
         # 色环「不可达色相」提示（默认开；设置持久化）
         self.show_unreachable = True
         try:
-            self.show_unreachable = (Krita.instance().readSetting(
-                "", SHOW_UNREACHABLE_KEY, "") or "1") != "0"
-        except Exception:
+            self.show_unreachable = (
+                Krita.instance().readSetting("", SHOW_UNREACHABLE_KEY, "") or "1"
+            ) != "0"
+        except RuntimeError:
             self.show_unreachable = True
         # 自定义按键表（R14：JSON 持久化；空/坏值 = 默认表）
         self.keymap = keymap_core.default_keymap()
         try:
             self.keymap = keymap_core.parse(
-                Krita.instance().readSetting("", KEYMAP_KEY, "") or "")
-        except Exception:
+                Krita.instance().readSetting("", KEYMAP_KEY, "") or ""
+            )
+        except (RuntimeError, TypeError, ValueError):
             self.keymap = keymap_core.default_keymap()
         # 全局「临时切换键」（T-53）：按住它 + 键表基础行 = 临时翻转彩度口径；none = 不自动翻转
         self.temp_chroma_key = "shift"
         try:
-            _tk = str(Krita.instance().readSetting("", TEMP_CHROMA_KEY_KEY, "") or "").strip()
+            _tk = str(
+                Krita.instance().readSetting("", TEMP_CHROMA_KEY_KEY, "") or ""
+            ).strip()
             if _tk in keymap_core.MOD_IDS:
                 self.temp_chroma_key = _tk
-        except Exception:
+        except RuntimeError:
             self.temp_chroma_key = "shift"
         # C 条口径：rel = 相对彩度 C_rel（默认）/ abs = 绝对彩度 C
         self.chroma_mode = "rel"
         try:
-            _cm = str(Krita.instance().readSetting("", CHROMA_MODE_KEY, "") or "").strip()
+            _cm = str(
+                Krita.instance().readSetting("", CHROMA_MODE_KEY, "") or ""
+            ).strip()
             if _cm in ("rel", "abs"):
                 self.chroma_mode = _cm
-        except Exception:
+        except RuntimeError:
             self.chroma_mode = "rel"
         # 绝对口径下的量程：不勾（默认）= 固定 [0, C_ABS_LIM] 有死区；勾 = 满量程 [0, C_max]
         self.chroma_full = False
         try:
-            self.chroma_full = (Krita.instance().readSetting(
-                "", CHROMA_FULL_KEY, "") or "0") != "0"
-        except Exception:
+            self.chroma_full = (
+                Krita.instance().readSetting("", CHROMA_FULL_KEY, "") or "0"
+            ) != "0"
+        except RuntimeError:
             self.chroma_full = False
         # 绝对 C 线簇密度：fixed（默认，0.02~0.36 共 18 档）/ even（按色相纯色 C_max 等分 9 档）
         self.abs_cluster_mode = "fixed"
         try:
-            _acm = str(Krita.instance().readSetting(
-                "", CHROMA_ABS_CLUSTER_KEY, "") or "").strip()
+            _acm = str(
+                Krita.instance().readSetting("", CHROMA_ABS_CLUSTER_KEY, "") or ""
+            ).strip()
             if _acm in ("even", "fixed"):
                 self.abs_cluster_mode = _acm
-        except Exception:
+        except RuntimeError:
             self.abs_cluster_mode = "fixed"
         # 明度标准：oklab = Oklab 感知明度 L（默认，零影响）/ gray = 灰阶码值（色彩校样口径）
         # 只影响 L 条 / L 数值框 / 锁明度动作 / 等明度线与簇 / C_max·C_rel 的 L 轴；
         # a/b 分量条的内部 L 轴永远是 Oklab L。
         self.lightness_metric = "oklab"
         try:
-            _lm = str(Krita.instance().readSetting("", LIGHTNESS_METRIC_KEY, "") or "").strip()
+            _lm = str(
+                Krita.instance().readSetting("", LIGHTNESS_METRIC_KEY, "") or ""
+            ).strip()
             if _lm in LIGHTNESS_METRICS:
                 self.lightness_metric = _lm
-        except Exception:
+        except RuntimeError:
             self.lightness_metric = "oklab"
         # 浮层选项：off（关闭）/ 1s / 2s / hover（默认，鼠标悬停拾色器即显示）/ always；持久化
         self.preview_mode = PREVIEW_DEFAULT_MODE
         try:
-            raw_mode = str(Krita.instance().readSetting("", PREVIEW_MODE_KEY, "") or "").strip()
+            raw_mode = str(
+                Krita.instance().readSetting("", PREVIEW_MODE_KEY, "") or ""
+            ).strip()
             if raw_mode in PREVIEW_MODES:
                 self.preview_mode = raw_mode
-        except Exception:
+        except RuntimeError:
             self.preview_mode = PREVIEW_DEFAULT_MODE
-        self.preview_hide_ms = PREVIEW_HIDE_MS   # 「2 秒」模式的倒计时（测试会临时调小）
-        self._overlay = None                     # 预览浮层（惰性创建的独立小窗）
-        self._keymap_dialog = None               # 「按键功能…」操作矩阵（惰性创建、已开复用）
-        self._keymap_dialog_wanted = False       # R24：对话框是否应为「打开」状态
-        self._keymap_dialog_hidden_by_host = False   # R24：因宿主最小化而临时隐藏
-        self._was_shown = False                  # 面板是否显示过（离屏初始化时不据此收起浮层）
+        self.preview_hide_ms = PREVIEW_HIDE_MS  # 「2 秒」模式的倒计时（测试会临时调小）
+        self._overlay = None  # 预览浮层（惰性创建的独立小窗）
+        self._keymap_dialog = None  # 「按键功能…」操作矩阵（惰性创建、已开复用）
+        self._keymap_dialog_wanted = False  # R24：对话框是否应为「打开」状态
+        self._keymap_dialog_hidden_by_host = False  # R24：因宿主最小化而临时隐藏
+        self._was_shown = False  # 面板是否显示过（离屏初始化时不据此收起浮层）
         # 浮层下排两格：本轮操作开始时的「上上次 / 上一次选色」（整轮不变，松手后也保持）
         self._preview_last_rgb = _UNSET
         self._preview_older_rgb = _UNSET
-        self._picker_hovered = False             # 「悬停」模式：鼠标是否在拾色器内
+        self._picker_hovered = False  # 「悬停」模式：鼠标是否在拾色器内
         # T-53 切换键悬停预览：鼠标在面板内 + 按住全局临时切换键 -> 临时预览另一口径
-        self._panel_hovered = False              # 由 widgetAt(鼠标位置) 父链判定，主/弹窗各自维护
-        self._hover_suspended = False            # 应用失活时暂停悬停预览
+        self._panel_hovered = False  # 由 widgetAt(鼠标位置) 父链判定，主/弹窗各自维护
+        self._hover_suspended = False  # 应用失活时暂停悬停预览
         self._hover_filter_installed = False
-        self._kb_shift = False                   # 显式维护的修饰键状态（KeyPress/KeyRelease，修正松开不回）
+        self._kb_shift = (
+            False  # 显式维护的修饰键状态（KeyPress/KeyRelease，修正松开不回）
+        )
         self._kb_ctrl = False
         self._kb_alt = False
-        self._strip_ab_ctx = None       # a/b 条拖动期间锁定的 (M0, a, b)
-        self._strip_ab_Lok = None       # a/b 条按下时刻的 Oklab L（可达区间冻结用）
-        self._strip_ab_metric = None    # a/b 条按下时刻的「明度标准」
-        self._strip_ab_gray_iv = None   # gray 口径：本分量「目标灰阶可达」区间缓存
-        self._strip_active = False      # 色条拖动中（跨面板同步隔离用）
-        self._suppress_until = 0.0      # 写入/同步后短窗口内，画布上与当前色差 ≤1 的变化视为回声
+        self._strip_ab_ctx = None  # a/b 条拖动期间锁定的 (M0, a, b)
+        self._strip_ab_Lok = None  # a/b 条按下时刻的 Oklab L（可达区间冻结用）
+        self._strip_ab_metric = None  # a/b 条按下时刻的「明度标准」
+        self._strip_ab_gray_iv = None  # gray 口径：本分量「目标灰阶可达」区间缓存
+        self._strip_active = False  # 色条拖动中（跨面板同步隔离用）
+        self._suppress_until = (
+            0.0  # 写入/同步后短窗口内，画布上与当前色差 ≤1 的变化视为回声
+        )
         self.h = 0.0
         self.s = 1.0
         self.v = 1.0
-        self._status = QLabel(self)     # 仅用于内部错误提示；必须隐藏，否则会飘在面板左上角
+        self._status = QLabel(
+            self
+        )  # 仅用于内部错误提示；必须隐藏，否则会飘在面板左上角
         self._status.hide()
         # Krita normalizes a docker's outer margins. Keep our padding inside
         # a content widget rather than competing with the dock host.
@@ -354,8 +410,8 @@ class HsvPickerPanel(QWidget):
         outer.addWidget(content)
         self._build_ui(root)
         self._sync_entries()
-        self.history_listeners = []     # 跨面板同步：历史变化时回调
-        self.view_listeners = []        # 跨面板同步：显示开关变化时回调
+        self.history_listeners = []  # 跨面板同步：历史变化时回调
+        self.view_listeners = []  # 跨面板同步：显示开关变化时回调
         self._load_history()
         self.destroyed.connect(self._on_panel_destroyed)
         # 预览浮层跟随拾色器：只在浮层显示期间跑（每 150ms 重锚定一次），隐藏即停表
@@ -367,10 +423,8 @@ class HsvPickerPanel(QWidget):
         self._poll.setInterval(120)
         self._poll.timeout.connect(self._poll_external)
         self._poll.start()
-        try:
-            self._install_hover_filter()     # T-53：应用级事件过滤，供切换键悬停预览
-        except Exception:
-            pass
+        with suppress(RuntimeError):
+            self._install_hover_filter()  # T-53：应用级事件过滤，供切换键悬停预览
         if self.debug_log:
             self._dbg_session()
         self.refresh_status()
@@ -387,13 +441,17 @@ class HsvPickerPanel(QWidget):
         self.picker.interaction_started.connect(self._on_pick_start)
         self.picker.interaction_finished.connect(self._on_pick_end)
         self.picker.set_keymap(self.keymap)
-        self.picker.set_chroma_mode(self.chroma_mode)   # T-48：拾色器跟随 C 条口径
-        self.picker.set_temp_chroma_key(self.temp_chroma_key)   # T-53：按下动作/悬停共用的临时切换键
+        self.picker.set_chroma_mode(self.chroma_mode)  # T-48：拾色器跟随 C 条口径
+        self.picker.set_temp_chroma_key(
+            self.temp_chroma_key
+        )  # T-53：按下动作/悬停共用的临时切换键
         self.picker.set_show_unreachable(bool(self.show_unreachable))
         # 「悬停」模式用：鼠标进出拾色器
         self.picker.hover_enter = self._on_picker_hover_enter
         self.picker.hover_leave = self._on_picker_hover_leave
-        self.history = history_widget.HistoryWidget(self.mid_box, on_pick=self._on_history_pick)
+        self.history = history_widget.HistoryWidget(
+            self.mid_box, on_pick=self._on_history_pick
+        )
         root.addWidget(self.mid_box, 1)
 
         # Native settings icon keeps the color row usable in narrow dockers.
@@ -403,53 +461,73 @@ class HsvPickerPanel(QWidget):
         self.btn_menu.setIcon(Krita.instance().icon("configure"))
         self.btn_menu.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.btn_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.btn_menu.setToolTip(i18n.t("设置：显示、拾色和按键选项",
-                                      "Settings: display, picking and shortcuts"))
+        self.btn_menu.setToolTip(
+            i18n.t(
+                "设置：显示、拾色和按键选项", "Settings: display, picking and shortcuts"
+            )
+        )
         self.menu = QMenu(self.btn_menu)
-        self.act_clusters = QAction(i18n.t("显示明度/彩度线簇", "Show lightness/chroma cluster lines"), self.menu)
+        self.act_clusters = QAction(
+            i18n.t("显示明度/彩度线簇", "Show lightness/chroma cluster lines"),
+            self.menu,
+        )
         self.act_clusters.setCheckable(True)
         self.act_clusters.setChecked(self.show_clusters)
         self.act_clusters.toggled.connect(self.set_show_clusters)
-        self.act_lines = QAction(i18n.t("显示明度/彩度线", "Show lightness/chroma through-lines"), self.menu)
+        self.act_lines = QAction(
+            i18n.t("显示明度/彩度线", "Show lightness/chroma through-lines"), self.menu
+        )
         self.act_lines.setCheckable(True)
         self.act_lines.setChecked(self.show_lines)
         self.act_lines.toggled.connect(self.set_show_lines)
         self.menu.addAction(self.act_clusters)
         self.menu.addAction(self.act_lines)
         # 色环「不可达色相」提示（默认开）：只叠细斜纹、不填灰底，不影响点击/拖动
-        self.act_unreachable = QAction(i18n.t("显示不可达色相提示",
-                                              "Show unreachable hue hint"), self.menu)
+        self.act_unreachable = QAction(
+            i18n.t("显示不可达色相提示", "Show unreachable hue hint"), self.menu
+        )
         self.act_unreachable.setCheckable(True)
-        self.act_unreachable.setToolTip(i18n.t(
-            "在色环上把「当前明度 + 当前绝对彩度 C 够不到」的色相段叠一层细斜纹；"
-            "只画斜线、不填灰底，斜线之间保留原色相；只影响观感，斜纹区照样可点可拖",
-            "Draw a thin hatch overlay over the hue spans that cannot reach the current "
-            "lightness + absolute chroma C; lines only, no gray fill, original hue remains "
-            "between lines; visual only, hatching stays clickable and draggable"))
+        self.act_unreachable.setToolTip(
+            i18n.t(
+                "在色环上把「当前明度 + 当前绝对彩度 C 够不到」的色相段叠一层细斜纹；"
+                "只画斜线、不填灰底，斜线之间保留原色相；只影响观感，斜纹区照样可点可拖",
+                "Draw a thin hatch overlay over the hue spans that cannot reach the current "
+                "lightness + absolute chroma C; lines only, no gray fill, original hue remains "
+                "between lines; visual only, hatching stays clickable and draggable",
+            )
+        )
         self.act_unreachable.blockSignals(True)
         self.act_unreachable.setChecked(self.show_unreachable)
         self.act_unreachable.blockSignals(False)
         self.act_unreachable.toggled.connect(self.set_show_unreachable)
         self.menu.addAction(self.act_unreachable)
-        self.act_show_ab = QAction(i18n.t("显示 Oklab a/b 分量条",
-                                          "Show Oklab a/b strips"), self.menu)
+        self.act_show_ab = QAction(
+            i18n.t("显示 Oklab a/b 分量条", "Show Oklab a/b strips"), self.menu
+        )
         self.act_show_ab.setCheckable(True)
-        self.act_show_ab.setToolTip(i18n.t(
-            "在明度/彩度条下方再加 a 条与 b 条（Oklab 的另外两个分量），可拖动改色",
-            "Add Oklab a and b strips below lightness/chroma; drag to change the color"))
+        self.act_show_ab.setToolTip(
+            i18n.t(
+                "在明度/彩度条下方再加 a 条与 b 条（Oklab 的另外两个分量），可拖动改色",
+                "Add Oklab a and b strips below lightness/chroma; drag to change the color",
+            )
+        )
         self.act_show_ab.blockSignals(True)
         self.act_show_ab.setChecked(self.show_ab)
         self.act_show_ab.blockSignals(False)
         self.act_show_ab.toggled.connect(self.set_show_ab)
         self.menu.addAction(self.act_show_ab)
-        self.act_ab_line = QAction(i18n.t("a/b 条满量程",
-                                          "a/b strips full range"), self.menu)
+        self.act_ab_line = QAction(
+            i18n.t("a/b 条满量程", "a/b strips full range"), self.menu
+        )
         self.act_ab_line.setCheckable(True)
-        self.act_ab_line.setToolTip(i18n.t(
-            "勾选：量程随「另一分量」变，但每一段都拖得到；不勾（默认）：量程只随明度变、"
-            "刻度更稳，够不到的段画成灰色斜纹",
-            "On: range follows the other component (every span is reachable); "
-            "Off (default): range follows lightness only, unreachable spans are hatched"))
+        self.act_ab_line.setToolTip(
+            i18n.t(
+                "勾选：量程随「另一分量」变，但每一段都拖得到；不勾（默认）：量程只随明度变、"
+                "刻度更稳，够不到的段画成灰色斜纹",
+                "On: range follows the other component (every span is reachable); "
+                "Off (default): range follows lightness only, unreachable spans are hatched",
+            )
+        )
         self.act_ab_line.blockSignals(True)
         self.act_ab_line.setChecked(self.ab_mode == "line")
         self.act_ab_line.blockSignals(False)
@@ -457,46 +535,62 @@ class HsvPickerPanel(QWidget):
         self.menu.addAction(self.act_ab_line)
         # C 条选项（二选一，默认相对彩度 C_rel）+ 绝对口径满量程
         self.menu_chroma = QMenu(i18n.t("C 条选项", "C strip options"), self.menu)
-        self.menu_chroma.setToolTip(i18n.t(
-            "相对彩度 C_rel = C / C_max(L,h) ∈ [0,1]，永远满量程；"
-            "绝对彩度 C = √(a²+b²)（Oklab 口径），量程固定 0~0.4 时够不到的段画灰斜纹",
-            "Relative chroma C_rel = C / C_max(L,h) in [0,1], always full range; "
-            "absolute chroma C = sqrt(a^2+b^2) (Oklab), fixed 0-0.4 range hatches unreachable spans"))
+        self.menu_chroma.setToolTip(
+            i18n.t(
+                "相对彩度 C_rel = C / C_max(L,h) ∈ [0,1]，永远满量程；"
+                "绝对彩度 C = √(a²+b²)（Oklab 口径），量程固定 0~0.4 时够不到的段画灰斜纹",
+                "Relative chroma C_rel = C / C_max(L,h) in [0,1], always full range; "
+                "absolute chroma C = sqrt(a^2+b^2) (Oklab), fixed 0-0.4 range hatches unreachable spans",
+            )
+        )
         self.chroma_group = QActionGroup(self.menu)
         self.chroma_group.setExclusive(True)
         self.chroma_actions = {}
-        for _mode, _zh, _en in (("rel", "相对彩度 C_rel", "Relative chroma C_rel"),
-                                ("abs", "绝对彩度 C", "Absolute chroma C")):
+        for _mode, _zh, _en in (
+            ("rel", "相对彩度 C_rel", "Relative chroma C_rel"),
+            ("abs", "绝对彩度 C", "Absolute chroma C"),
+        ):
             act = QAction(i18n.t(_zh, _en), self.menu_chroma)
             act.setCheckable(True)
             act.setChecked(_mode == self.chroma_mode)
-            act.triggered.connect(lambda _checked=False, m=_mode: self.set_chroma_mode(m))
+            act.triggered.connect(
+                lambda _checked=False, m=_mode: self.set_chroma_mode(m)
+            )
             self.chroma_group.addAction(act)
             self.menu_chroma.addAction(act)
             self.chroma_actions[_mode] = act
-        self.act_c_cluster_even = QAction(i18n.t(
-            "绝对 C 线簇按色相等分", "Even absolute C clusters by hue"), self.menu_chroma)
+        self.act_c_cluster_even = QAction(
+            i18n.t("绝对 C 线簇按色相等分", "Even absolute C clusters by hue"),
+            self.menu_chroma,
+        )
         self.act_c_cluster_even.setCheckable(True)
-        self.act_c_cluster_even.setToolTip(i18n.t(
-            "绝对彩度口径的线簇档位：不勾（默认）= 固定 0.02~0.36 步长 0.02 共 18 档"
-            "（够不到的明度段不画）；勾选 = 当前色相纯色 C_max(h) 的 10%~90% 共 9 档",
-            "Absolute chroma cluster levels: off (default) = fixed 0.02-0.36 in 0.02 steps "
-            "(18 levels); on = 9 levels at 10%-90% of the pure-color C_max(h)"))
+        self.act_c_cluster_even.setToolTip(
+            i18n.t(
+                "绝对彩度口径的线簇档位：不勾（默认）= 固定 0.02~0.36 步长 0.02 共 18 档"
+                "（够不到的明度段不画）；勾选 = 当前色相纯色 C_max(h) 的 10%~90% 共 9 档",
+                "Absolute chroma cluster levels: off (default) = fixed 0.02-0.36 in 0.02 steps "
+                "(18 levels); on = 9 levels at 10%-90% of the pure-color C_max(h)",
+            )
+        )
         self.act_c_cluster_even.blockSignals(True)
         self.act_c_cluster_even.setChecked(self.abs_cluster_mode != "fixed")
         self.act_c_cluster_even.blockSignals(False)
         self.act_c_cluster_even.toggled.connect(self.set_abs_cluster_even)
         self.menu_chroma.addAction(self.act_c_cluster_even)
         # 临时切换键（8 项互斥）：按住它 + 基础行动作 = 临时锁另一彩度口径
-        self.menu_temp_key = QMenu(i18n.t("临时切换键", "Temporary switch key"),
-                                   self.menu_chroma)
-        self.menu_temp_key.setToolTip(i18n.t(
-            "按住该键时：悬停面板即时预览另一彩度口径；按方块中/右键、环左/中/右键时"
-            "临时锁另一口径，松开恢复。none = 不自动翻转（*_other 动作仍可手动绑定）",
-            "Hold this key while hovering the panel to preview the other chroma scale; "
-            "pressing the square middle/right or ring left/middle/right buttons locks "
-            "the other scale until release. none = no auto flip (*_other actions remain "
-            "selectable in the key table)"))
+        self.menu_temp_key = QMenu(
+            i18n.t("临时切换键", "Temporary switch key"), self.menu_chroma
+        )
+        self.menu_temp_key.setToolTip(
+            i18n.t(
+                "按住该键时：悬停面板即时预览另一彩度口径；按方块中/右键、环左/中/右键时"
+                "临时锁另一口径，松开恢复。none = 不自动翻转（*_other 动作仍可手动绑定）",
+                "Hold this key while hovering the panel to preview the other chroma scale; "
+                "pressing the square middle/right or ring left/middle/right buttons locks "
+                "the other scale until release. none = no auto flip (*_other actions remain "
+                "selectable in the key table)",
+            )
+        )
         self.temp_key_group = QActionGroup(self.menu)
         self.temp_key_group.setExclusive(True)
         self.temp_key_actions = {}
@@ -505,7 +599,8 @@ class HsvPickerPanel(QWidget):
             act.setCheckable(True)
             act.setChecked(_mid == self.temp_chroma_key)
             act.triggered.connect(
-                lambda _checked=False, m=_mid: self.set_temp_chroma_key(m))
+                lambda _checked=False, m=_mid: self.set_temp_chroma_key(m)
+            )
             self.temp_key_group.addAction(act)
             self.menu_temp_key.addAction(act)
             self.temp_key_actions[_mid] = act
@@ -513,11 +608,14 @@ class HsvPickerPanel(QWidget):
         self.menu.addMenu(self.menu_chroma)
         self.act_c_full = QAction(i18n.t("C 条满量程", "C strip full range"), self.menu)
         self.act_c_full.setCheckable(True)
-        self.act_c_full.setToolTip(i18n.t(
-            "仅绝对口径生效。勾选：量程 = C_max(L,h)，永远满量程可达、无死区（刻度随颜色变）；"
-            "不勾（默认）：量程固定 0~0.4，够不到的段画灰斜纹、拖到底即停",
-            "Absolute scale only. On: range = C_max(L,h), always reachable (ticks follow the color); "
-            "Off (default): fixed 0-0.4 range, unreachable spans are hatched and dragging stops there"))
+        self.act_c_full.setToolTip(
+            i18n.t(
+                "仅绝对口径生效。勾选：量程 = C_max(L,h)，永远满量程可达、无死区（刻度随颜色变）；"
+                "不勾（默认）：量程固定 0~0.4，够不到的段画灰斜纹、拖到底即停",
+                "Absolute scale only. On: range = C_max(L,h), always reachable (ticks follow the color); "
+                "Off (default): fixed 0-0.4 range, unreachable spans are hatched and dragging stops there",
+            )
+        )
         self.act_c_full.blockSignals(True)
         self.act_c_full.setChecked(self.chroma_full)
         self.act_c_full.blockSignals(False)
@@ -525,24 +623,30 @@ class HsvPickerPanel(QWidget):
         self.menu.addAction(self.act_c_full)
         # 明度标准（二选一，默认 Oklab L）：只换 L 轴口径，a/b 条的内部 L 轴永远是 Oklab L
         self.menu_metric = QMenu(i18n.t("明度标准", "Lightness standard"), self.menu)
-        self.menu_metric.setToolTip(i18n.t(
-            "Oklab L = 感知明度（默认）；灰阶 = Krita 软打样那张灰块的码值 srgb_encode(Y)。"
-            "切换只改 L 条 / L 数值框 / 锁明度动作 / 等明度线 / C_max·C_rel 的 L 轴，"
-            "a/b 分量条的内部 L 轴永远是 Oklab L",
-            "Oklab L = perceptual lightness (default); Grayscale = the code value of Krita's "
-            "soft-proof gray patch, srgb_encode(Y). Switching only changes the L axis used by "
-            "the L strip / L field / lock-lightness actions / iso-lightness lines / C_max and "
-            "C_rel; the a/b strips always use Oklab L internally"))
+        self.menu_metric.setToolTip(
+            i18n.t(
+                "Oklab L = 感知明度（默认）；灰阶 = Krita 软打样那张灰块的码值 srgb_encode(Y)。"
+                "切换只改 L 条 / L 数值框 / 锁明度动作 / 等明度线 / C_max·C_rel 的 L 轴，"
+                "a/b 分量条的内部 L 轴永远是 Oklab L",
+                "Oklab L = perceptual lightness (default); Grayscale = the code value of Krita's "
+                "soft-proof gray patch, srgb_encode(Y). Switching only changes the L axis used by "
+                "the L strip / L field / lock-lightness actions / iso-lightness lines / C_max and "
+                "C_rel; the a/b strips always use Oklab L internally",
+            )
+        )
         self.metric_group = QActionGroup(self.menu)
         self.metric_group.setExclusive(True)
         self.metric_actions = {}
-        for _mode, _zh, _en in (("oklab", "Oklab L（感知明度）", "Oklab L (perceptual)"),
-                                ("gray", "灰阶（色彩校样）", "Grayscale (soft proof)")):
+        for _mode, _zh, _en in (
+            ("oklab", "Oklab L（感知明度）", "Oklab L (perceptual)"),
+            ("gray", "灰阶（色彩校样）", "Grayscale (soft proof)"),
+        ):
             act = QAction(i18n.t(_zh, _en), self.menu_metric)
             act.setCheckable(True)
             act.setChecked(_mode == self.lightness_metric)
             act.triggered.connect(
-                lambda _checked=False, m=_mode: self.set_lightness_metric(m))
+                lambda _checked=False, m=_mode: self.set_lightness_metric(m)
+            )
             self.metric_group.addAction(act)
             self.menu_metric.addAction(act)
             self.metric_actions[_mode] = act
@@ -550,57 +654,80 @@ class HsvPickerPanel(QWidget):
         self.menu.addSeparator()
         # 浮层选项（子菜单，五项互斥）：改色时在面板外侧弹出三格预览
         self.menu_preview = QMenu(i18n.t("浮层选项", "Overlay options"), self.menu)
-        self.menu_preview.setToolTip(i18n.t(
-            "浮层 = 改色时在面板外侧弹出的 100×150 三格预览"
-            "（当前选色 / 上一次选色 / 上上次选色）；靠屏幕边缘时自动翻到另一侧",
-            "Overlay = the 100x150 three-cell preview (current / last picked / the one before last) "
-            "popped up next to the panel while you change the color; it flips sides near the screen edge"))
+        self.menu_preview.setToolTip(
+            i18n.t(
+                "浮层 = 改色时在面板外侧弹出的 100×150 三格预览"
+                "（当前选色 / 上一次选色 / 上上次选色）；靠屏幕边缘时自动翻到另一侧",
+                "Overlay = the 100x150 three-cell preview (current / last picked / the one before last) "
+                "popped up next to the panel while you change the color; it flips sides near the screen edge",
+            )
+        )
         self.preview_group = QActionGroup(self.menu)
         self.preview_group.setExclusive(True)
         self.preview_actions = {}
-        for mode, label_zh, label_en in (("off", "关闭", "Off"),
-                                         ("1s", "1 秒", "1 second"),
-                                         ("2s", "2 秒", "2 seconds"),
-                                         ("hover", "悬停", "Hover"),
-                                         ("always", "一直", "Always")):
+        for mode, label_zh, label_en in (
+            ("off", "关闭", "Off"),
+            ("1s", "1 秒", "1 second"),
+            ("2s", "2 秒", "2 seconds"),
+            ("hover", "悬停", "Hover"),
+            ("always", "一直", "Always"),
+        ):
             act = QAction(i18n.t(label_zh, label_en), self.menu_preview)
             act.setCheckable(True)
             act.setChecked(mode == self.preview_mode)
-            act.triggered.connect(lambda _checked=False, m=mode: self.set_preview_mode(m))
+            act.triggered.connect(
+                lambda _checked=False, m=mode: self.set_preview_mode(m)
+            )
             self.preview_group.addAction(act)
             self.menu_preview.addAction(act)
             self.preview_actions[mode] = act
         self.menu.addMenu(self.menu_preview)
         self.menu.addSeparator()
         self.act_keymap = QAction(i18n.t("按键功能…", "Key functions..."), self.menu)
-        self.act_keymap.setToolTip(i18n.t(
-            "打开自定义按键表：选区域×输入（鼠标键+修饰键）×动作；"
-            "改完立即生效并保存，底部可恢复默认",
-            "Open the custom key table: area x input (mouse button + modifier) x action; "
-            "changes take effect and are stored immediately, with a Restore defaults button"))
+        self.act_keymap.setToolTip(
+            i18n.t(
+                "打开自定义按键表：选区域×输入（鼠标键+修饰键）×动作；"
+                "改完立即生效并保存，底部可恢复默认",
+                "Open the custom key table: area x input (mouse button + modifier) x action; "
+                "changes take effect and are stored immediately, with a Restore defaults button",
+            )
+        )
         self.act_keymap.triggered.connect(self.show_keymap_dialog)
         self.menu.addAction(self.act_keymap)
-        self.act_auto_close = QAction(i18n.t("点击弹出面板外时自动关闭",
-                                             "Auto-close popup when clicking outside"), self.menu)
+        self.act_auto_close = QAction(
+            i18n.t(
+                "点击弹出面板外时自动关闭", "Auto-close popup when clicking outside"
+            ),
+            self.menu,
+        )
         self.act_auto_close.setCheckable(True)
         self.act_auto_close.blockSignals(True)
         self.act_auto_close.setChecked(self.auto_close_popup)
         self.act_auto_close.blockSignals(False)
         self.act_auto_close.toggled.connect(self.set_auto_close_popup)
         self.menu.addAction(self.act_auto_close)
-        self.act_on_top = QAction(i18n.t("弹出面板置顶", "Keep popup always on top"), self.menu)
+        self.act_on_top = QAction(
+            i18n.t("弹出面板置顶", "Keep popup always on top"), self.menu
+        )
         self.act_on_top.setCheckable(True)
-        self.act_on_top.setToolTip(i18n.t(
-            "弹出面板保持在其他窗口之上；自动关闭开启时禁用。Wayland 使用 Krita 内浮窗，不支持桌面全局置顶。",
-            "Keep the popup above other windows; disabled with auto-close. "
-            "Wayland uses a child inside Krita, not desktop-global stacking."))
+        self.act_on_top.setToolTip(
+            i18n.t(
+                "弹出面板保持在其他窗口之上；自动关闭开启时禁用。Wayland 使用 Krita 内浮窗，不支持桌面全局置顶。",
+                "Keep the popup above other windows; disabled with auto-close. "
+                "Wayland uses a child inside Krita, not desktop-global stacking.",
+            )
+        )
         self.act_on_top.blockSignals(True)
         self.act_on_top.setChecked(self.always_on_top)
         self.act_on_top.blockSignals(False)
-        self.act_on_top.setEnabled(self._supports_global_top and not self.auto_close_popup)
+        self.act_on_top.setEnabled(
+            self._supports_global_top and not self.auto_close_popup
+        )
         self.act_on_top.toggled.connect(self.set_always_on_top)
         self.menu.addAction(self.act_on_top)
-        self.act_mouse_pos = QAction(i18n.t("弹出位置跟随鼠标", "Popup at mouse position"), self.menu)
+        self.act_mouse_pos = QAction(
+            i18n.t("弹出位置跟随鼠标", "Popup at mouse position"), self.menu
+        )
         self.act_mouse_pos.setCheckable(True)
         self.act_mouse_pos.blockSignals(True)
         self.act_mouse_pos.setChecked(self.popup_at_mouse)
@@ -610,11 +737,14 @@ class HsvPickerPanel(QWidget):
         self.menu.addSeparator()
         self.act_debug = QAction(i18n.t("诊断日志", "Diagnostic log"), self.menu)
         self.act_debug.setCheckable(True)
-        self.act_debug.setToolTip(i18n.t(
-            "开启后把交互与内部状态写入 %APPDATA%\\krita\\hsv_picker_debug.log"
-            "（每次启动 Krita 自动关闭；开启时覆盖上次日志）",
-            "Write interaction and internal state to %APPDATA%\\krita\\hsv_picker_debug.log"
-            " (off on every Krita start; enabling overwrites the previous log)"))
+        self.act_debug.setToolTip(
+            i18n.t(
+                "开启后把交互与内部状态写入 %APPDATA%\\krita\\hsv_picker_debug.log"
+                "（每次启动 Krita 自动关闭；开启时覆盖上次日志）",
+                "Write interaction and internal state to %APPDATA%\\krita\\hsv_picker_debug.log"
+                " (off on every Krita start; enabling overwrites the previous log)",
+            )
+        )
         self.act_debug.blockSignals(True)
         self.act_debug.setChecked(self.debug_log)
         self.act_debug.blockSignals(False)
@@ -624,20 +754,33 @@ class HsvPickerPanel(QWidget):
             self.act_debug.setText(i18n.t("诊断日志（开启中）", "Diagnostic log (on)"))
         self.menu.addSeparator()
         self.act_about = QAction(
-            i18n.t("关于馍馍拾色器 v" + str(__version__),
-                   "About Momo Color Picker v" + str(__version__)), self.menu)
-        self.act_about.setToolTip(i18n.t(
-            "显示 slogan、版本、许可与第三方依赖信息",
-            "Show the slogan, version, license and third-party notices"))
+            i18n.t(
+                "关于馍馍拾色器 v" + str(__version__),
+                "About Momo Color Picker v" + str(__version__),
+            ),
+            self.menu,
+        )
+        self.act_about.setToolTip(
+            i18n.t(
+                "显示 slogan、版本、许可与第三方依赖信息",
+                "Show the slogan, version, license and third-party notices",
+            )
+        )
         self.act_about.triggered.connect(self.show_about_dialog)
         self.menu.addAction(self.act_about)
         self.btn_menu.setMenu(self.menu)
 
         # Separate color identity from numeric editing instead of squeezing
         # settings, HSV and HEX into one row.
-        self.edit_h = self._make_entry(DragValueEdit, "0.00", 58, (0.0, 360.0), 0.2, True, "h")
-        self.edit_s = self._make_entry(DragValueEdit, "100.00", 60, (0.0, 100.0), 0.2, False, "s")
-        self.edit_v = self._make_entry(DragValueEdit, "100.00", 60, (0.0, 100.0), 0.2, False, "v")
+        self.edit_h = self._make_entry(
+            DragValueEdit, "0.00", 58, (0.0, 360.0), 0.2, True, "h"
+        )
+        self.edit_s = self._make_entry(
+            DragValueEdit, "100.00", 60, (0.0, 100.0), 0.2, False, "s"
+        )
+        self.edit_v = self._make_entry(
+            DragValueEdit, "100.00", 60, (0.0, 100.0), 0.2, False, "v"
+        )
         self.edit_hex = self._make_entry(QLineEdit, "#FF0000", 88)
         self.edit_hex.setAccessibleName("HEX")
         self.swatch_cur = swatch_widget.CurrentColorSwatch(self)
@@ -655,7 +798,10 @@ class HsvPickerPanel(QWidget):
 
         hsv_row = QHBoxLayout()
         hsv_row.setSpacing(12)
-        label_width = max(self.fontMetrics().horizontalAdvance(text) for text in ("H", "S", "V")) + 2
+        label_width = (
+            max(self.fontMetrics().horizontalAdvance(text) for text in ("H", "S", "V"))
+            + 2
+        )
         for text, edit in (("H", self.edit_h), ("S", self.edit_s), ("V", self.edit_v)):
             label = QLabel(text, self)
             label.setFixedWidth(label_width)
@@ -673,19 +819,26 @@ class HsvPickerPanel(QWidget):
         self.strip_l_row = QHBoxLayout()
         self.strip_l_row.setSpacing(8)
         self.strip_l = strip_widget.LightnessStrip(
-            self, on_changed=self._on_strip_lightness, metric=self.lightness_metric,
-            on_press=self._on_strip_l_press, on_release=self._on_strip_release)
+            self,
+            on_changed=self._on_strip_lightness,
+            metric=self.lightness_metric,
+            on_press=self._on_strip_l_press,
+            on_release=self._on_strip_release,
+        )
         # 四个分量数值框（L / C / a / b）**等宽** = 字体实测最大值：
         # 四条色条行都是 [标签][色条(stretch)][数值框(定宽)]，框宽不同会让四条色条的右端错开。
         # 样例取最坏情况："0.0000"（L/C）与 "-0.0000"（a/b 带符号，比 "+" 宽）。
-        _uni_w = max(self._entry_width(self.edit_h, "0.0000", 64, 8),
-                     self._entry_width(self.edit_h, "-0.0000", 64, 8))
+        _uni_w = max(
+            self._entry_width(self.edit_h, "0.0000", 64, 8),
+            self._entry_width(self.edit_h, "-0.0000", 64, 8),
+        )
         self.edit_l = QLineEdit("0.5000", self)
         self.edit_l.setFixedWidth(_uni_w)
         self.edit_l.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.edit_l.editingFinished.connect(self._on_entry_commit)
         self.lbl_l = self._strip_label(
-            "L", i18n.t("Oklab 明度 L（0~1）", "Oklab lightness L (0-1)"))
+            "L", i18n.t("Oklab 明度 L（0~1）", "Oklab lightness L (0-1)")
+        )
         self.strip_l_row.addWidget(self.lbl_l)
         self.strip_l_row.addWidget(self.strip_l, 1)
         self.strip_l_row.addWidget(self.edit_l)
@@ -694,15 +847,22 @@ class HsvPickerPanel(QWidget):
         self.strip_c_row = QHBoxLayout()
         self.strip_c_row.setSpacing(8)
         self.strip_c = strip_widget.ChromaStrip(
-            self, on_changed=self._on_strip_chroma,
-            on_press=self._on_strip_c_press, on_release=self._on_strip_release)
+            self,
+            on_changed=self._on_strip_chroma,
+            on_press=self._on_strip_c_press,
+            on_release=self._on_strip_release,
+        )
         self.edit_c = QLineEdit("1.0000", self)
         self.edit_c.setFixedWidth(_uni_w)
         self.edit_c.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.edit_c.editingFinished.connect(self._on_entry_commit)
         self.lbl_c = self._strip_label(
-            "C", i18n.t("相对彩度 C（0~1；1 = 该明度/色相下最饱和）",
-                        "Relative chroma C (0-1; 1 = most saturated at this lightness/hue)"))
+            "C",
+            i18n.t(
+                "相对彩度 C（0~1；1 = 该明度/色相下最饱和）",
+                "Relative chroma C (0-1; 1 = most saturated at this lightness/hue)",
+            ),
+        )
         self.strip_c_row.addWidget(self.lbl_c)
         self.strip_c_row.addWidget(self.strip_c, 1)
         self.strip_c_row.addWidget(self.edit_c)
@@ -712,16 +872,21 @@ class HsvPickerPanel(QWidget):
         self.strip_a_row = QHBoxLayout()
         self.strip_a_row.setSpacing(8)
         self.strip_a = strip_widget.AbStrip(
-            self, axis="a", mode=self.ab_mode,
+            self,
+            axis="a",
+            mode=self.ab_mode,
             on_changed=lambda v: self._on_strip_ab("a", v),
             on_press=lambda: self._on_strip_ab_press("a"),
-            on_release=self._on_strip_release)
+            on_release=self._on_strip_release,
+        )
         self.edit_a = QLineEdit("+0.0000", self)
         self.edit_a.setFixedWidth(_uni_w)
         self.edit_a.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.edit_a.editingFinished.connect(self._on_entry_commit)
         self.lbl_a = self._strip_label(
-            "a", i18n.t("Oklab a 分量（绿 ↔ 红方向）", "Oklab a component (green to red)"))
+            "a",
+            i18n.t("Oklab a 分量（绿 ↔ 红方向）", "Oklab a component (green to red)"),
+        )
         self.strip_a_row.addWidget(self.lbl_a)
         self.strip_a_row.addWidget(self.strip_a, 1)
         self.strip_a_row.addWidget(self.edit_a)
@@ -730,16 +895,21 @@ class HsvPickerPanel(QWidget):
         self.strip_b_row = QHBoxLayout()
         self.strip_b_row.setSpacing(8)
         self.strip_b = strip_widget.AbStrip(
-            self, axis="b", mode=self.ab_mode,
+            self,
+            axis="b",
+            mode=self.ab_mode,
             on_changed=lambda v: self._on_strip_ab("b", v),
             on_press=lambda: self._on_strip_ab_press("b"),
-            on_release=self._on_strip_release)
+            on_release=self._on_strip_release,
+        )
         self.edit_b = QLineEdit("+0.0000", self)
         self.edit_b.setFixedWidth(_uni_w)
         self.edit_b.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.edit_b.editingFinished.connect(self._on_entry_commit)
         self.lbl_b = self._strip_label(
-            "b", i18n.t("Oklab b 分量（蓝 ↔ 黄方向）", "Oklab b component (blue to yellow)"))
+            "b",
+            i18n.t("Oklab b 分量（蓝 ↔ 黄方向）", "Oklab b component (blue to yellow)"),
+        )
         self.strip_b_row.addWidget(self.lbl_b)
         self.strip_b_row.addWidget(self.strip_b, 1)
         self.strip_b_row.addWidget(self.edit_b)
@@ -748,19 +918,26 @@ class HsvPickerPanel(QWidget):
         self._apply_ab_visible()
         self._apply_chroma_label()
         self._apply_lightness_metric()
-        self._apply_keymap()          # 把自定义按键表灌进四条色条与三个可拖动数值框
-        tab_order = (self.edit_hex, self.btn_menu, self.edit_h, self.edit_s, self.edit_v,
-                     self.edit_l, self.edit_c, self.edit_a, self.edit_b)
-        for previous, current in zip(tab_order, tab_order[1:]):
+        self._apply_keymap()  # 把自定义按键表灌进四条色条与三个可拖动数值框
+        tab_order = (
+            self.edit_hex,
+            self.btn_menu,
+            self.edit_h,
+            self.edit_s,
+            self.edit_v,
+            self.edit_l,
+            self.edit_c,
+            self.edit_a,
+            self.edit_b,
+        )
+        for previous, current in itertools.pairwise(tab_order):
             QWidget.setTabOrder(previous, current)
         # 首帧预算：预览浮层首次 show 要付 Qt 建原生窗口的一次性成本（本机 ~4ms）。
         # 它不属于 gray 可达区间，却会落进「首次拖动帧」；这里在面板构造时把原生
         # 窗口预创建掉（winId 不显示窗口、不抢焦点、观感与行为不变），首帧只付刷新。
-        try:
+        with suppress(RuntimeError):
             if getattr(self, "preview_mode", PREVIEW_DEFAULT_MODE) != "off":
                 self.preview_overlay().winId()
-        except Exception:
-            pass
 
     def _strip_label(self, symbol, tip):
         """色条之前的符号标签（L / C / a / b）：固定宽度，保证 4 条左端对齐。"""
@@ -791,21 +968,27 @@ class HsvPickerPanel(QWidget):
         self._sync_swatch_height()
         super().showEvent(event)
         self._hover_suspended = False
-        self._sync_kb_from_app()      # 显示时校准一次，避免隐藏期间漏掉 KeyRelease
-        self._refresh_panel_hover()   # T-53：重新显示时按鼠标位置 + 按键状态刷新预览
+        self._sync_kb_from_app()  # 显示时校准一次，避免隐藏期间漏掉 KeyRelease
+        self._refresh_panel_hover()  # T-53：重新显示时按鼠标位置 + 按键状态刷新预览
         if getattr(self, "preview_mode", PREVIEW_DEFAULT_MODE) == "always":
-            self._preview_update(start_countdown=False)   # 「一直」模式：打开面板即显示
+            self._preview_update(start_countdown=False)  # 「一直」模式：打开面板即显示
 
     def event(self, ev):
         # 布局在每次尺寸变化后都要重算中间区（拾色器居中 + 历史列等高）
         from PyQt6.QtCore import QEvent
+
         if ev.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Resize):
             self._update_panel_minimum()
             self._layout_picker()
-        if ev.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange) and hasattr(self, "edit_b"):
+        if ev.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange) and hasattr(
+            self, "edit_b"
+        ):
             # Child fonts are inherited after the parent's change event.
             QTimer.singleShot(0, self._layout_entry_widths)
-        if ev.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange) and hasattr(self, "btn_menu"):
+        if ev.type() in (
+            QEvent.Type.PaletteChange,
+            QEvent.Type.StyleChange,
+        ) and hasattr(self, "btn_menu"):
             self.btn_menu.setIcon(Krita.instance().icon("configure"))
         return super().event(ev)
 
@@ -837,7 +1020,9 @@ class HsvPickerPanel(QWidget):
         """Measure the active Qt style, including Breeze's inner frame margins."""
         option = QStyleOptionFrame()
         edit.initStyleOption(option)
-        contents = edit.style().subElementRect(QStyle.SubElement.SE_LineEditContents, option, edit)
+        contents = edit.style().subElementRect(
+            QStyle.SubElement.SE_LineEditContents, option, edit
+        )
         margins = edit.textMargins()
         return edit.width() - contents.width() + margins.left() + margins.right() + 4
 
@@ -849,9 +1034,11 @@ class HsvPickerPanel(QWidget):
         """
         try:
             advance = int(widget.fontMetrics().horizontalAdvance(sample))
-        except Exception:
+        except (AttributeError, RuntimeError):
             return int(minimum)
-        return max(int(minimum), advance + self._entry_decoration_width(widget) + int(padding))
+        return max(
+            int(minimum), advance + self._entry_decoration_width(widget) + int(padding)
+        )
 
     def _entry_widgets(self):
         """颜色行及 HSV 行的输入框，共用字体测量与对齐逻辑。"""
@@ -868,9 +1055,14 @@ class HsvPickerPanel(QWidget):
         """Let Qt distribute the HSV row; never trade away complete values."""
         if not _alive(self) or not _alive(getattr(self, "edit_b", None)):
             return
-        full = max(self._entry_width(self.edit_h, sample, 58, 6)
-                   for sample in ("359.99", "100.00"))
-        label_width = max(self.fontMetrics().horizontalAdvance(text) for text in ("H", "S", "V")) + 2
+        full = max(
+            self._entry_width(self.edit_h, sample, 58, 6)
+            for sample in ("359.99", "100.00")
+        )
+        label_width = (
+            max(self.fontMetrics().horizontalAdvance(text) for text in ("H", "S", "V"))
+            + 2
+        )
         for text, edit in (("H", self.edit_h), ("S", self.edit_s), ("V", self.edit_v)):
             self._entry_labels[text].setFixedWidth(label_width)
             edit.setMinimumWidth(full)
@@ -889,24 +1081,41 @@ class HsvPickerPanel(QWidget):
         for edit in self._entry_widgets():
             if not _alive(edit):
                 continue
-            try:
+            with suppress(AttributeError, RuntimeError):
                 fm = edit.fontMetrics()
-                need = fm.horizontalAdvance(edit.text()) + self._entry_decoration_width(edit)
-                want = Qt.AlignmentFlag.AlignLeft if int(edit.width()) < int(need) else Qt.AlignmentFlag.AlignRight
+                need = fm.horizontalAdvance(edit.text()) + self._entry_decoration_width(
+                    edit
+                )
+                want = (
+                    Qt.AlignmentFlag.AlignLeft
+                    if int(edit.width()) < int(need)
+                    else Qt.AlignmentFlag.AlignRight
+                )
                 if (edit.alignment() & Qt.AlignmentFlag.AlignHorizontal_Mask) != want:
                     edit.setAlignment(want)
                 if want == Qt.AlignmentFlag.AlignLeft and not edit.hasFocus():
-                    edit.setCursorPosition(0)   # 不聚焦时把显示停在文本开头
-            except Exception:
-                pass
+                    edit.setCursorPosition(0)  # 不聚焦时把显示停在文本开头
 
-    def _make_entry(self, cls, text, width, value_range=(0.0, 1.0), sensitivity=0.6,
-                    wrap=False, kind=None):
+    def _make_entry(
+        self,
+        cls,
+        text,
+        width,
+        value_range=(0.0, 1.0),
+        sensitivity=0.6,
+        wrap=False,
+        kind=None,
+    ):
         if cls is DragValueEdit:
-            edit = cls(self, value_range=value_range, sensitivity=sensitivity,
-                       decimals=2, wrap=wrap,
-                       # 用默认参数捕获 kind，避免依赖 self.sender()
-                       on_drag=lambda val, k=kind: self._on_drag_value(k, val))
+            edit = cls(
+                self,
+                value_range=value_range,
+                sensitivity=sensitivity,
+                decimals=2,
+                wrap=wrap,
+                # 用默认参数捕获 kind，避免依赖 self.sender()
+                on_drag=lambda val, k=kind: self._on_drag_value(k, val),
+            )
             edit.kind = kind
         else:
             edit = cls(text, self)
@@ -920,7 +1129,7 @@ class HsvPickerPanel(QWidget):
         """拖动 H/S/V 数值框时实时应用（与拾色器拖动一致，实时写前景色）。"""
         self._editing_field = kind
         if not getattr(self, "_entry_dragging", False):
-            self._preview_begin()   # 数值框拖动开始：记下「上一次选色」
+            self._preview_begin()  # 数值框拖动开始：记下「上一次选色」
         self._entry_dragging = True
         self._dbg_ctx = "entry_drag_" + str(kind)
         if kind == "h":
@@ -929,7 +1138,6 @@ class HsvPickerPanel(QWidget):
             self.set_color(self.h, value / 100.0, self.v)
         elif kind == "v":
             self.set_color(self.h, self.s, value / 100.0)
-
 
     # ------------------------------------------------- Krita 视图绑定
     # ---- 历史颜色（16 色 LRU，持久化在 Krita 设置里）----
@@ -943,7 +1151,7 @@ class HsvPickerPanel(QWidget):
         raw = ""
         try:
             raw = Krita.instance().readSetting("", HISTORY_KEY, "") or ""
-        except Exception:
+        except RuntimeError:
             raw = ""
         items = [x.strip().upper() for x in raw.split(",") if x.strip()]
         items = [x for x in items if len(x) == 7 and x.startswith("#")][:128]
@@ -955,33 +1163,33 @@ class HsvPickerPanel(QWidget):
         self._save_history()
 
     def _save_history(self):
-        try:
-            Krita.instance().writeSetting("", HISTORY_KEY, ",".join(self.history.colors))
-        except Exception:
-            pass
+        with suppress(RuntimeError):
+            Krita.instance().writeSetting(
+                "", HISTORY_KEY, ",".join(self.history.colors)
+            )
 
     def _push_history(self, hex_text=None):
-        hex_text = (hex_text or ("#%02X%02X%02X" % self.picker_rgb())).upper()
+        hex_text = (
+            hex_text or ("#{:02X}{:02X}{:02X}".format(*self.picker_rgb()))
+        ).upper()
         items = [c for c in self.history.colors if c != hex_text]
         items.insert(0, hex_text)
         self.history.set_colors(items[:128])
         self._save_history()
         for cb in getattr(self, "history_listeners", []) or []:
-            try:
+            with suppress(RuntimeError):
                 cb(self.history.colors)
-            except Exception:
-                pass
 
     def _on_history_pick(self, hex_text):
         try:
             r, g, b = math_core.parse_hex(hex_text)
-        except Exception:
+        except (TypeError, ValueError):
             return
         h, s, v = math_core.srgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
         if s <= 1e-6:
             h = self.h
         self._dbg_ctx = "history"
-        self._preview_begin()       # 点击历史前：先把「上一次选色」记下来
+        self._preview_begin()  # 点击历史前：先把「上一次选色」记下来
         self.set_color(h, s, v, write_fg=True)
         self._push_history(hex_text)
 
@@ -1013,13 +1221,19 @@ class HsvPickerPanel(QWidget):
         if qc is None:
             return
         my_rgb = self.picker_rgb()
-        my_hex = "#%02X%02X%02X" % my_rgb
+        my_hex = "#{:02X}{:02X}{:02X}".format(*my_rgb)
         canvas_hex = qc.name().upper()
         if not self._canvas_close_to_picker(canvas_hex):
             if dlog.is_enabled():
-                dlog.log("POLL_MISMATCH", canvas=canvas_hex, picker=my_hex,
-                         dr=qc.red() - my_rgb[0], dg=qc.green() - my_rgb[1],
-                         db=qc.blue() - my_rgb[2], picking=int(self._picking))
+                dlog.log(
+                    "POLL_MISMATCH",
+                    canvas=canvas_hex,
+                    picker=my_hex,
+                    dr=qc.red() - my_rgb[0],
+                    dg=qc.green() - my_rgb[1],
+                    db=qc.blue() - my_rgb[2],
+                    picking=int(self._picking),
+                )
             self._dirty = True
             self.refresh_status()
 
@@ -1034,25 +1248,31 @@ class HsvPickerPanel(QWidget):
             return
         try:
             h, s, v = math_core.srgb_to_hsv(qc.redF(), qc.greenF(), qc.blueF())
-        except Exception:
+        except (TypeError, ValueError):
             return
         if s <= 1e-6:
-            h = self.h            # 灰轴：保留原色相
+            h = self.h  # 灰轴：保留原色相
         if dlog.is_enabled():
-            dlog.log("PULL", src=qc.name().upper(), reason=reason, h=round(h, 3),
-                     s=round(s, 5), v=round(v, 6))
+            dlog.log(
+                "PULL",
+                src=qc.name().upper(),
+                reason=reason,
+                h=round(h, 3),
+                s=round(s, 5),
+                v=round(v, 6),
+            )
         self._dbg_ctx = "pull"
-        self.set_color(h, s, v, write_fg=False, preview=False)   # 外部改色不弹浮层
+        self.set_color(h, s, v, write_fg=False, preview=False)  # 外部改色不弹浮层
         self._suppress_until = time.monotonic() + 0.5
 
     def set_view(self, view):
         if self._view is not None:
-            for signal, slot in ((self._view.foregroundColorChanged, self._on_fg_changed),
-                                 (self._view.backgroundColorChanged, self._on_bg_changed)):
-                try:
+            for signal, slot in (
+                (self._view.foregroundColorChanged, self._on_fg_changed),
+                (self._view.backgroundColorChanged, self._on_bg_changed),
+            ):
+                with suppress(TypeError, RuntimeError):
                     signal.disconnect(slot)
-                except (TypeError, RuntimeError):
-                    pass
         self._view = view
         if view is not None:
             view.foregroundColorChanged.connect(self._on_fg_changed)
@@ -1063,57 +1283,73 @@ class HsvPickerPanel(QWidget):
         """画布颜色与当前颜色是否在 U8/画布量化容差（±1/255）内。"""
         try:
             r, g, b = self.picker_rgb()
-            if hex_now == "#%02X%02X%02X" % (r, g, b):
+            if hex_now == f"#{r:02X}{g:02X}{b:02X}":
                 return True
             hr = int(hex_now[1:3], 16)
             hg = int(hex_now[3:5], 16)
             hb = int(hex_now[5:7], 16)
             return abs(hr - r) <= 1 and abs(hg - g) <= 1 and abs(hb - b) <= 1
-        except Exception:
+        except (AttributeError, IndexError, TypeError, ValueError):
             return False
 
     def _on_fg_changed(self):
         if self._syncing:
             if dlog.is_enabled():
-                dlog.log_throttled("SIG_FG", 10, sync=1, internal=int(bool(self._internal)),
-                                   hex="-")
+                dlog.log_throttled(
+                    "SIG_FG", 10, sync=1, internal=int(bool(self._internal)), hex="-"
+                )
             return
         qc = read_fg_qcolor(self._view if self._view is not None else active_view())
         hex_now = qc.name().upper() if qc is not None else None
         # 写入/同步后的短窗口内，画布上与当前色相差 ≤1 的变化都是回声，不回读（避免量化值拉回抖动）
-        if hex_now is not None and time.monotonic() < self._suppress_until \
-                and self._canvas_close_to_picker(hex_now):
+        if (
+            hex_now is not None
+            and time.monotonic() < self._suppress_until
+            and self._canvas_close_to_picker(hex_now)
+        ):
             if dlog.is_enabled():
                 dlog.log_throttled("SIG_FG", 10, sync=0, echo=1, hex=hex_now)
             return
         if dlog.is_enabled():
-            dlog.log_throttled("SIG_FG", 10, sync=0, internal=int(bool(self._internal)),
-                               hex=(hex_now or "-"))
+            dlog.log_throttled(
+                "SIG_FG",
+                10,
+                sync=0,
+                internal=int(bool(self._internal)),
+                hex=(hex_now or "-"),
+            )
         if self._interacting():
             return
         if not self._internal:
-            self._dirty = True          # 外部（含系统拾色器）改色：需要回读进拾色器
+            self._dirty = True  # 外部（含系统拾色器）改色：需要回读进拾色器
         self.refresh_status()
 
     def _on_pick_start(self):
         """开始拾色：记下浮层下排两格（上上次/上一次选色），本轮内保持不变。"""
         self._picking = True
         self._dbg_ctx = "picker"
-        self._preview_begin()       # 记下本轮操作前的「上一次选色」
-        self._sync_entries()        # T-51：临时口径开始时立即切 C 条/数值框显示
-        dlog.log("PICK_START", h=round(self.h, 3), s=round(self.s, 5), v=round(self.v, 6))
+        self._preview_begin()  # 记下本轮操作前的「上一次选色」
+        self._sync_entries()  # T-51：临时口径开始时立即切 C 条/数值框显示
+        dlog.log(
+            "PICK_START", h=round(self.h, 3), s=round(self.s, 5), v=round(self.v, 6)
+        )
 
     def _on_pick_end(self):
         """拾色结束：恢复实时跟随 Krita 前景色，并把当前色计入历史。"""
         self._picking = False
         # T-53：松手后若切换键仍按住且鼠标仍在面板内，继续悬停预览另一口径
         self._update_hover_temp()
-        self._sync_entries()        # T-51：临时口径已在 picker 松手时清掉，这里恢复持久口径显示
-        dlog.log("PICK_END", h=round(self.h, 3), s=round(self.s, 5), v=round(self.v, 6),
-                 hex="#%02X%02X%02X" % self.picker_rgb())
+        self._sync_entries()  # T-51：临时口径已在 picker 松手时清掉，这里恢复持久口径显示
+        dlog.log(
+            "PICK_END",
+            h=round(self.h, 3),
+            s=round(self.s, 5),
+            v=round(self.v, 6),
+            hex="#{:02X}{:02X}{:02X}".format(*self.picker_rgb()),
+        )
         self._push_history()
         self.refresh_status()
-        self._preview_start_countdown()      # 松手后才开始 2 秒倒计时
+        self._preview_start_countdown()  # 松手后才开始 2 秒倒计时
 
     def _on_bg_changed(self):
         if not self._syncing:
@@ -1123,14 +1359,14 @@ class HsvPickerPanel(QWidget):
     def picker_rgb(self):
         """当前拾色器颜色的 8bit RGB。"""
         rgb = math_core.hsv_to_srgb(self.h, self.s, self.v)
-        return tuple(int(round(float(c) * 255.0)) for c in rgb)
+        return tuple(round(float(c) * 255.0) for c in rgb)
 
     def apply_external(self, h, s, v, hex_text, write_fg=False):
         """由另一个面板同步过来的颜色：完全同步（颜色/读数/色条/色块一起更新）。"""
         if not _alive(self) or not _alive(getattr(self, "picker", None)):
             return
         if self._interacting():
-            return                      # 本面板正在拖动：不让对端覆盖，松手后会自然对齐
+            return  # 本面板正在拖动：不让对端覆盖，松手后会自然对齐
         self._external_update = True
         self._dbg_ctx = "external"
         self._dirty = False
@@ -1156,7 +1392,9 @@ class HsvPickerPanel(QWidget):
         self._sync_entries()
         if not getattr(self, "_external_update", False):
             # 先广播给对端再写 Krita：对端据此打上"回声"标记，避免把量化回读再推回来
-            self.color_synced.emit(self.h, self.s, self.v, "#%02X%02X%02X" % self.picker_rgb())
+            self.color_synced.emit(
+                self.h, self.s, self.v, "#{:02X}{:02X}{:02X}".format(*self.picker_rgb())
+            )
         if write_fg:
             self._write_fg()
         self.refresh_status()
@@ -1170,11 +1408,16 @@ class HsvPickerPanel(QWidget):
             if dlog.is_enabled():
                 dlog.log("WRITE_FG_SKIP", reason="no_view")
             return
-        hex_now = "#%02X%02X%02X" % self.picker_rgb()
+        hex_now = "#{:02X}{:02X}{:02X}".format(*self.picker_rgb())
         self._suppress_until = time.monotonic() + 0.5
         if dlog.is_enabled():
-            dlog.log("WRITE_FG", hex=hex_now,
-                     h=round(self.h, 3), s=round(self.s, 5), v=round(self.v, 6))
+            dlog.log(
+                "WRITE_FG",
+                hex=hex_now,
+                h=round(self.h, 3),
+                s=round(self.s, 5),
+                v=round(self.v, 6),
+            )
         self._syncing = True
         self._internal = True
         try:
@@ -1192,11 +1435,13 @@ class HsvPickerPanel(QWidget):
         self.v = self.picker.v
         self._sync_entries()
         if not getattr(self, "_external_update", False):
-            self.color_synced.emit(self.h, self.s, self.v, "#%02X%02X%02X" % self.picker_rgb())
+            self.color_synced.emit(
+                self.h, self.s, self.v, "#{:02X}{:02X}{:02X}".format(*self.picker_rgb())
+            )
         self._write_fg()
         self.refresh_status()
         self._dbg_color(True)
-        self._preview_update()      # 拾色器拖动：实时更新浮层（拖动中不倒计时）
+        self._preview_update()  # 拾色器拖动：实时更新浮层（拖动中不倒计时）
 
     def _sync_entries(self):
         """把当前颜色同步到所有读数与色条（色条位置按"左 0"口径）。
@@ -1205,13 +1450,13 @@ class HsvPickerPanel(QWidget):
         """
         skip = getattr(self, "_editing_field", None)
         if skip != "h":
-            self.edit_h.setText("%.2f" % self.h)
+            self.edit_h.setText(f"{self.h:.2f}")
         if skip != "s":
             self.edit_s.setText("%.2f" % (self.s * 100.0))
         if skip != "v":
             self.edit_v.setText("%.2f" % (self.v * 100.0))
         if skip != "hex":
-            self.edit_hex.setText("#%02X%02X%02X" % self.picker_rgb())
+            self.edit_hex.setText("#{:02X}{:02X}{:02X}".format(*self.picker_rgb()))
         # T-48/T-51：持久口径 + 线簇密度灌进拾色器；临时口径（Shift+中/右）只影响显示
         eff_mode = self.chroma_mode
         if _alive(getattr(self, "picker", None)):
@@ -1220,15 +1465,15 @@ class HsvPickerPanel(QWidget):
             eff_mode = self.picker.effective_chroma_mode()
         self._apply_chroma_label(eff_mode)
         L = float(math_core.lightness(self.h, self.s, self.v, self.lightness_metric))
-        self.edit_l.setText("%.4f" % L)
+        self.edit_l.setText(f"{L:.4f}")
         self.strip_l.set_hue(self.h)
-        self.strip_l.set_value(L)                # 左 0（黑）
+        self.strip_l.set_value(L)  # 左 0（黑）
         self.strip_c.set_context(self.h, L)
         # C 条与 C 数值框按**生效口径**显示：Shift 临时切换期间跟另一口径，松手恢复
         self.strip_c.set_mode(eff_mode, self.chroma_full)
         c_disp = self._crel_now() if eff_mode == "rel" else self._cabs_now()
         if skip != "c":
-            self.edit_c.setText("%.4f" % c_disp)
+            self.edit_c.setText(f"{c_disp:.4f}")
         self.strip_c.set_value(self.strip_c.t_of(c_disp))
         # Oklab a / b 分量（同一个颜色的另一组坐标）
         if getattr(self, "show_ab", True):
@@ -1239,9 +1484,9 @@ class HsvPickerPanel(QWidget):
             if _alive(getattr(self, "strip_b", None)):
                 self.strip_b.set_context(L_ab, a_now, b_now)
             if skip_ab != "a" and _alive(getattr(self, "edit_a", None)):
-                self.edit_a.setText("%+.4f" % a_now)
+                self.edit_a.setText(f"{a_now:+.4f}")
             if skip_ab != "b" and _alive(getattr(self, "edit_b", None)):
-                self.edit_b.setText("%+.4f" % b_now)
+                self.edit_b.setText(f"{b_now:+.4f}")
         self._update_entry_alignments()
 
     def _ab_now(self):
@@ -1252,11 +1497,18 @@ class HsvPickerPanel(QWidget):
         """
         try:
             return tuple(float(x) for x in math_core.oklab_ab(self.h, self.s, self.v))
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             try:
-                return float(math_core.lightness(self.h, self.s, self.v,
-                                                self.lightness_metric)), 0.0, 0.0
-            except Exception:
+                return (
+                    float(
+                        math_core.lightness(
+                            self.h, self.s, self.v, self.lightness_metric
+                        )
+                    ),
+                    0.0,
+                    0.0,
+                )
+            except (ArithmeticError, TypeError, ValueError):
                 return 0.0, 0.0, 0.0
 
     def _ab_ctx_now(self):
@@ -1267,13 +1519,15 @@ class HsvPickerPanel(QWidget):
         · metric = 按下时刻的明度标准（保存下来，拖动中途切菜单也不换口径）。
         """
         try:
-            L_ok, a0, b0 = (float(x) for x in math_core.oklab_ab(self.h, self.s, self.v))
-        except Exception:
+            L_ok, a0, b0 = (
+                float(x) for x in math_core.oklab_ab(self.h, self.s, self.v)
+            )
+        except (ArithmeticError, TypeError, ValueError):
             L_ok, a0, b0 = self._ab_now()
         metric = self.lightness_metric
         try:
             M0 = float(math_core.lightness(self.h, self.s, self.v, metric))
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             M0 = L_ok if metric == "oklab" else 0.0
         return M0, a0, b0, L_ok, metric
 
@@ -1287,12 +1541,17 @@ class HsvPickerPanel(QWidget):
         """
         if str(metric) == "gray":
             # 纯 Python 标量快路径（同式、同二分；numpy 标量调度太贵）
-            return float(math_core.solve_ab_L_for_gray(float(target), float(a), float(b),
-                                                       iters=iters))
+            return float(
+                math_core.solve_ab_L_for_gray(
+                    float(target), float(a), float(b), iters=iters
+                )
+            )
+
         def f(Lv):
             rgb = math_core.oklab_to_srgb(Lv, a, b)
             hh, ss, vv = math_core.srgb_to_hsv(
-                float(rgb[0]), float(rgb[1]), float(rgb[2]))
+                float(rgb[0]), float(rgb[1]), float(rgb[2])
+            )
             return float(math_core.lightness(hh, ss, vv, metric))
 
         lo, hi = 0.0, 1.0
@@ -1312,8 +1571,7 @@ class HsvPickerPanel(QWidget):
     def _gray_at_ab_L(self, L_ok, a, b):
         """(Oklab L, a, b) -> sRGB 钳位后颜色的**灰阶码值**。"""
         rgb = math_core.oklab_to_srgb(float(L_ok), float(a), float(b))
-        hh, ss, vv = math_core.srgb_to_hsv(
-            float(rgb[0]), float(rgb[1]), float(rgb[2]))
+        hh, ss, vv = math_core.srgb_to_hsv(float(rgb[0]), float(rgb[1]), float(rgb[2]))
         return float(math_core.lightness(hh, ss, vv, "gray"))
 
     def _ab_gray_component_interval(self, axis, other, target, x0, l_hint=None):
@@ -1332,20 +1590,27 @@ class HsvPickerPanel(QWidget):
         这样灰阶严格不变（与其它色条「拖到底即停」一致）。
         结果按 (axis, other, target, x0, l_hint) 缓存，拖动期间每帧不重算。
         """
-        key = (axis, round(float(other), 6), round(float(target), 6),
-               round(float(x0), 6), None if l_hint is None else round(float(l_hint), 6))
+        key = (
+            axis,
+            round(float(other), 6),
+            round(float(target), 6),
+            round(float(x0), 6),
+            None if l_hint is None else round(float(l_hint), 6),
+        )
         cached = getattr(self, "_strip_ab_gray_iv", None)
         if cached is not None and cached[0] == key:
             return float(cached[1]), float(cached[2])
 
         try:
-            iv = math_core.gray_component_interval(axis, other, target, x0, l_hint=l_hint)
-        except Exception:
+            iv = math_core.gray_component_interval(
+                axis, other, target, x0, l_hint=l_hint
+            )
+        except (ArithmeticError, TypeError, ValueError):
             dlog.log("ERR", where="gray_component_interval", tb=traceback.format_exc())
             iv = None
         if iv is None:
             lim = float(math_core._AB_LIM)
-            return -lim, lim               # 异常兜底：不钳（维持旧行为）
+            return -lim, lim  # 异常兜底：不钳（维持旧行为）
         self._strip_ab_gray_iv = (key, float(iv[0]), float(iv[1]))
         return float(iv[0]), float(iv[1])
 
@@ -1362,15 +1627,17 @@ class HsvPickerPanel(QWidget):
 
     def _crel_now(self):
         try:
-            return float(math_core.crel_of_xyz(self.h, self.lightness_metric, self.s, self.v)[0])
-        except Exception:
+            return float(
+                math_core.crel_of_xyz(self.h, self.lightness_metric, self.s, self.v)[0]
+            )
+        except (ArithmeticError, TypeError, ValueError):
             return 0.0
 
     def _cabs_now(self):
         """当前颜色的**绝对彩度** C = √(a²+b²)（Oklab 口径）。"""
         try:
             return float(math_core.ok_L_C(self.h, self.s, self.v)[1])
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             return 0.0
 
     def _crel_arclen_t(self):
@@ -1378,7 +1645,12 @@ class HsvPickerPanel(QWidget):
 
         C 条坐标改成线性（C_rel / C）后不再使用，保留仅为兼容旧探针脚本。
         """
-        key = (round(self.h, 2), round(self.s, 5), round(self.v, 5), self.lightness_metric)
+        key = (
+            round(self.h, 2),
+            round(self.s, 5),
+            round(self.v, 5),
+            self.lightness_metric,
+        )
         if getattr(self, "_arclen_key", None) == key:
             return self._arclen_val
         val = self._crel_arclen_t_impl()
@@ -1389,14 +1661,20 @@ class HsvPickerPanel(QWidget):
     def _crel_arclen_t_impl(self):
         try:
             ss, vv = math_core.iso_lightness_curve(
-                self.h, float(math_core.lightness(self.h, self.s, self.v, self.lightness_metric)),
-                self.lightness_metric, n_v=33, iters=12)
+                self.h,
+                float(
+                    math_core.lightness(self.h, self.s, self.v, self.lightness_metric)
+                ),
+                self.lightness_metric,
+                n_v=33,
+                iters=12,
+            )
             if len(ss) < 2:
                 return 0.0
             tt = math_core.curve_arclen(ss, vv)
             i = int((np.abs(ss - self.s) + np.abs(vv - self.v)).argmin())
             return float(tt[i])
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             return 0.0
 
     # ---- 色条回调 ----
@@ -1405,7 +1683,10 @@ class HsvPickerPanel(QWidget):
         lo, hi = 0.0, 1.0
         for _ in range(iters):
             mid = 0.5 * (lo + hi)
-            if float(math_core.lightness(h, s_fixed, mid, self.lightness_metric)) < l_target:
+            if (
+                float(math_core.lightness(h, s_fixed, mid, self.lightness_metric))
+                < l_target
+            ):
                 lo = mid
             else:
                 hi = mid
@@ -1416,7 +1697,10 @@ class HsvPickerPanel(QWidget):
         lo, hi = 0.0, 1.0
         for _ in range(iters):
             mid = 0.5 * (lo + hi)
-            if float(math_core.lightness(h, mid, 1.0, self.lightness_metric)) > l_target:
+            if (
+                float(math_core.lightness(h, mid, 1.0, self.lightness_metric))
+                > l_target
+            ):
                 lo = mid
             else:
                 hi = mid
@@ -1428,48 +1712,77 @@ class HsvPickerPanel(QWidget):
         相对口径保持 C_rel（与旧版一致）；绝对口径保持绝对 C —— 由 R6 规定。
         """
         self._strip_s0 = float(self.s)
-        self._strip_crel = None       # 关键：每次按下重新锁定（此前会残留上次的 C_rel）
+        self._strip_crel = None  # 关键：每次按下重新锁定（此前会残留上次的 C_rel）
         self._strip_cabs = None
         self._strip_active = True
         self._preview_begin()
         self._dbg_strip_tag = "L"
-        self._freeze_picker_lines("crel")     # 锁 C_rel → 蓝线冻结、红线实时
+        self._freeze_picker_lines("crel")  # 锁 C_rel → 蓝线冻结、红线实时
         if dlog.is_enabled():
-            dlog.log("STRIP_L_DOWN", h=round(self.h, 3), s=round(self.s, 5),
-                     v=round(self.v, 6), crel=round(self._crel_now(), 4),
-                     cabs=round(self._cabs_now(), 4),
-                     l=round(float(math_core.lightness(
-                         self.h, self.s, self.v, self.lightness_metric)), 5))
+            dlog.log(
+                "STRIP_L_DOWN",
+                h=round(self.h, 3),
+                s=round(self.s, 5),
+                v=round(self.v, 6),
+                crel=round(self._crel_now(), 4),
+                cabs=round(self._cabs_now(), 4),
+                l=round(
+                    float(
+                        math_core.lightness(
+                            self.h, self.s, self.v, self.lightness_metric
+                        )
+                    ),
+                    5,
+                ),
+            )
 
     def _on_strip_c_press(self):
         """彩度条按下：锁定此刻的明度，并冻结红蓝过点线。"""
-        self._strip_L = float(math_core.lightness(self.h, self.s, self.v, self.lightness_metric))
+        self._strip_L = float(
+            math_core.lightness(self.h, self.s, self.v, self.lightness_metric)
+        )
         self._strip_active = True
         self._preview_begin()
         self._dbg_strip_tag = "C"
-        self._freeze_picker_lines("iso")      # 锁明度 → 红线冻结、蓝线实时
+        self._freeze_picker_lines("iso")  # 锁明度 → 红线冻结、蓝线实时
         if dlog.is_enabled():
-            dlog.log("STRIP_C_DOWN", h=round(self.h, 3), s=round(self.s, 5),
-                     v=round(self.v, 6), l=round(self._strip_L, 5))
+            dlog.log(
+                "STRIP_C_DOWN",
+                h=round(self.h, 3),
+                s=round(self.s, 5),
+                v=round(self.v, 6),
+                l=round(self._strip_L, 5),
+            )
 
     def _on_strip_release(self):
         self._strip_s0 = None
         self._strip_L = None
-        self._strip_crel = None       # 松手解绑，避免下次拖动沿用旧 C_rel
-        self._strip_cabs = None       # 绝对口径的锁定值同理
-        self._clear_strip_ab_ctx()    # a/b 条同理（含 gray 可达区间缓存）
-        self._strip_active = False    # 先解锁：松手后的刷新允许回读对齐
-        self._update_hover_temp()     # 松手：按键仍按住且鼠标在面板内则恢复悬停预览
+        self._strip_crel = None  # 松手解绑，避免下次拖动沿用旧 C_rel
+        self._strip_cabs = None  # 绝对口径的锁定值同理
+        self._clear_strip_ab_ctx()  # a/b 条同理（含 gray 可达区间缓存）
+        self._strip_active = False  # 先解锁：松手后的刷新允许回读对齐
+        self._update_hover_temp()  # 松手：按键仍按住且鼠标在面板内则恢复悬停预览
         if dlog.is_enabled():
-            dlog.log("STRIP_UP", tag=getattr(self, "_dbg_strip_tag", "-"),
-                     h=round(self.h, 3), s=round(self.s, 5), v=round(self.v, 6),
-                     l=round(float(math_core.lightness(
-                         self.h, self.s, self.v, self.lightness_metric)), 5),
-                     crel=round(self._crel_now(), 4))
+            dlog.log(
+                "STRIP_UP",
+                tag=getattr(self, "_dbg_strip_tag", "-"),
+                h=round(self.h, 3),
+                s=round(self.s, 5),
+                v=round(self.v, 6),
+                l=round(
+                    float(
+                        math_core.lightness(
+                            self.h, self.s, self.v, self.lightness_metric
+                        )
+                    ),
+                    5,
+                ),
+                crel=round(self._crel_now(), 4),
+            )
         self._freeze_picker_lines(None)
         self.refresh_status()
-        self._push_history()          # 色条拖动结束也计入历史
-        self._preview_start_countdown()      # 松手后才开始 2 秒倒计时
+        self._push_history()  # 色条拖动结束也计入历史
+        self._preview_start_countdown()  # 松手后才开始 2 秒倒计时
 
     def _freeze_picker_lines(self, mode):
         """按锁定线冻结过点线：mode = "iso"（锁明度）/ "crel"（锁彩度）/ None（全实时）。"""
@@ -1483,7 +1796,10 @@ class HsvPickerPanel(QWidget):
         lo, hi = 0.0, 1.0
         for _ in range(iters):
             mid = 0.5 * (lo + hi)
-            if float(math_core.lightness(h, s_fixed, mid, self.lightness_metric)) < l_target:
+            if (
+                float(math_core.lightness(h, s_fixed, mid, self.lightness_metric))
+                < l_target
+            ):
                 lo = mid
             else:
                 hi = mid
@@ -1494,7 +1810,10 @@ class HsvPickerPanel(QWidget):
         lo, hi = 0.0, float(s_max)
         for _ in range(iters):
             mid = 0.5 * (lo + hi)
-            if float(math_core.lightness(h, mid, 1.0, self.lightness_metric)) > l_target:
+            if (
+                float(math_core.lightness(h, mid, 1.0, self.lightness_metric))
+                > l_target
+            ):
                 lo = mid
             else:
                 hi = mid
@@ -1510,11 +1829,13 @@ class HsvPickerPanel(QWidget):
         if hit is not None:
             dlog.log_throttled("LV_HIT", 120, key=key)
             return hit
-        v = np.concatenate([
-            np.geomspace(1e-3, 0.02, 21),
-            np.linspace(0.02, 0.95, 74),
-            np.linspace(0.95, 1.0, 51)[1:],     # 顶部加密（蓝线在此平滑收敛到纯白）
-        ])
+        v = np.concatenate(
+            [
+                np.geomspace(1e-3, 0.02, 21),
+                np.linspace(0.02, 0.95, 74),
+                np.linspace(0.95, 1.0, 51)[1:],  # 顶部加密（蓝线在此平滑收敛到纯白）
+            ]
+        )
         s_arr = math_core.solve_s_at_crel(hue, self.lightness_metric, v, float(crel))
         ok = np.isfinite(s_arr)
         if int(ok.sum()) < 8:
@@ -1536,25 +1857,30 @@ class HsvPickerPanel(QWidget):
         L = math_core.lightness(hue, s_arr, v, self.lightness_metric)
         order = np.argsort(L)
         L, v, s_arr = L[order], v[order], s_arr[order]
-        L = np.maximum.accumulate(L)      # 保证插值用的 L 单调（消除数值抖动）
+        L = np.maximum.accumulate(L)  # 保证插值用的 L 单调（消除数值抖动）
         out = (L, v, s_arr)
         if len(cache) > 48:
             cache.clear()
         cache[key] = out
         if dlog.is_enabled():
-            dlog.log("LV_BUILD", key=key, n=len(L), L0=round(float(L[0]), 5),
-                     L1=round(float(L[-1]), 5), s0=round(float(s_arr[0]), 5),
-                     v0=round(float(v[0]), 6), v1=round(float(v[-1]), 6))
+            dlog.log(
+                "LV_BUILD",
+                key=key,
+                n=len(L),
+                L0=round(float(L[0]), 5),
+                L1=round(float(L[-1]), 5),
+                s0=round(float(s_arr[0]), 5),
+                v0=round(float(v[0]), 6),
+                v1=round(float(v[-1]), 6),
+            )
         return out
 
     def _eff_chroma_mode(self):
         """生效口径：优先拾色器临时口径（悬停预览 / 自动翻转），取不到时回落持久口径。"""
         picker = getattr(self, "picker", None)
         if _alive(picker):
-            try:
+            with suppress(RuntimeError):
                 return picker.effective_chroma_mode()
-            except Exception:
-                pass
         return self.chroma_mode
 
     def _on_strip_lightness(self, t):
@@ -1574,42 +1900,70 @@ class HsvPickerPanel(QWidget):
         if crel is None:
             crel = self._crel_now()
             if getattr(self, "_strip_active", False):
-                self._strip_crel = crel      # 拖动期间才锁定（数值框提交不写回这一个槽）
-        dlog.log_throttled("STRIP_L", 8, t=round(float(t), 4), L_t=round(L_target, 5),
-                           crel=round(float(crel), 4))
+                self._strip_crel = crel  # 拖动期间才锁定（数值框提交不写回这一个槽）
+        dlog.log_throttled(
+            "STRIP_L",
+            8,
+            t=round(float(t), 4),
+            L_t=round(L_target, 5),
+            crel=round(float(crel), 4),
+        )
         if L_target <= 1e-9:
             dlog.log_throttled("STRIP_L_EDGE", 200, edge="black", t=round(float(t), 4))
-            self.set_color(self.h, self.s, 0.0, write_fg=True)   # 纯黑
+            self.set_color(self.h, self.s, 0.0, write_fg=True)  # 纯黑
             return
         if L_target >= 1.0 - 1e-9:
             dlog.log_throttled("STRIP_L_EDGE", 200, edge="white", t=round(float(t), 4))
-            self.set_color(self.h, 0.0, 1.0, write_fg=True)      # 纯白（蓝线的极限端点）
+            self.set_color(self.h, 0.0, 1.0, write_fg=True)  # 纯白（蓝线的极限端点）
             return
         try:
             curve = self._lv_curve(self.h, crel)
             if curve is None:
-                dlog.log_throttled("STRIP_L_SKIP", 200, reason="curve_none",
-                                   t=round(float(t), 4), crel=round(float(crel), 4))
+                dlog.log_throttled(
+                    "STRIP_L_SKIP",
+                    200,
+                    reason="curve_none",
+                    t=round(float(t), 4),
+                    crel=round(float(crel), 4),
+                )
                 return
             L_tab, v_tab, s_tab = curve
             if L_target > float(L_tab[-1]) + 1e-12:
                 idx = len(L_tab) - 1
-                dlog.log_throttled("STRIP_L_CLAMP", 200, side="high",
-                                   t=round(float(t), 4), L_t=round(L_target, 5),
-                                   L1=round(float(L_tab[-1]), 5))
-                self.set_color(self.h, float(s_tab[idx]), float(v_tab[idx]), write_fg=True)
+                dlog.log_throttled(
+                    "STRIP_L_CLAMP",
+                    200,
+                    side="high",
+                    t=round(float(t), 4),
+                    L_t=round(L_target, 5),
+                    L1=round(float(L_tab[-1]), 5),
+                )
+                self.set_color(
+                    self.h, float(s_tab[idx]), float(v_tab[idx]), write_fg=True
+                )
                 return
             if L_target < float(L_tab[0]) - 1e-12:
-                dlog.log_throttled("STRIP_L_CLAMP", 200, side="low",
-                                   t=round(float(t), 4), L_t=round(L_target, 5),
-                                   L0=round(float(L_tab[0]), 5))
+                dlog.log_throttled(
+                    "STRIP_L_CLAMP",
+                    200,
+                    side="low",
+                    t=round(float(t), 4),
+                    L_t=round(L_target, 5),
+                    L0=round(float(L_tab[0]), 5),
+                )
             v_new = float(np.interp(L_target, L_tab, v_tab))
             s_new = float(np.interp(L_target, L_tab, s_tab))
-            dlog.log_throttled("STRIP_L_HIT", 8, L_t=round(L_target, 5),
-                               L0=round(float(L_tab[0]), 5), L1=round(float(L_tab[-1]), 5),
-                               s=round(s_new, 5), v=round(v_new, 6))
+            dlog.log_throttled(
+                "STRIP_L_HIT",
+                8,
+                L_t=round(L_target, 5),
+                L0=round(float(L_tab[0]), 5),
+                L1=round(float(L_tab[-1]), 5),
+                s=round(s_new, 5),
+                v=round(v_new, 6),
+            )
             self.set_color(self.h, s_new, v_new, write_fg=True)
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             dlog.log("ERR", where="strip_lightness", tb=traceback.format_exc())
             return
 
@@ -1622,14 +1976,16 @@ class HsvPickerPanel(QWidget):
         if cabs is None:
             cabs = self._cabs_now()
             if getattr(self, "_strip_active", False):
-                self._strip_cabs = cabs       # 拖动期间才锁定
-        dlog.log_throttled("STRIP_L_ABS", 8, t=round(float(L_target), 4),
-                           cabs=round(float(cabs), 4))
+                self._strip_cabs = cabs  # 拖动期间才锁定
+        dlog.log_throttled(
+            "STRIP_L_ABS", 8, t=round(float(L_target), 4), cabs=round(float(cabs), 4)
+        )
         try:
             s_new, v_new = math_core.sv_at_L_C(
-                self.h, L_target, cabs, self.lightness_metric, clamp=True)
+                self.h, L_target, cabs, self.lightness_metric, clamp=True
+            )
             self.set_color(self.h, s_new, v_new, write_fg=True)
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             dlog.log("ERR", where="strip_lightness_abs", tb=traceback.format_exc())
 
     def _on_strip_chroma_value(self, value):
@@ -1643,21 +1999,36 @@ class HsvPickerPanel(QWidget):
             # 明度锁定只在「C 条拖动」期间有效；数值框提交用当前色的明度
             L = self._strip_L if getattr(self, "_strip_active", False) else None
             if L is None:
-                L = float(math_core.lightness(self.h, self.s, self.v, self.lightness_metric))
+                L = float(
+                    math_core.lightness(self.h, self.s, self.v, self.lightness_metric)
+                )
             eff = self._eff_chroma_mode()
             if eff == "rel":
-                cmax = float(np.asarray(math_core.cmax_of_L(
-                    self.h, self.lightness_metric, np.array([L])), dtype=np.float64)[0])
+                cmax = float(
+                    np.asarray(
+                        math_core.cmax_of_L(
+                            self.h, self.lightness_metric, np.array([L])
+                        ),
+                        dtype=np.float64,
+                    )[0]
+                )
                 c_abs = mc_clamp(float(value)) * cmax
             else:
                 c_abs = float(value)
             s_x, v_x = math_core.sv_at_L_C(
-                self.h, L, c_abs, self.lightness_metric, clamp=True)
-            dlog.log_throttled("STRIP_C", 8, mode=eff,
-                               val=round(float(value), 4), L=round(L, 5),
-                               s=round(s_x, 5), v=round(v_x, 6))
+                self.h, L, c_abs, self.lightness_metric, clamp=True
+            )
+            dlog.log_throttled(
+                "STRIP_C",
+                8,
+                mode=eff,
+                val=round(float(value), 4),
+                L=round(L, 5),
+                s=round(s_x, 5),
+                v=round(v_x, 6),
+            )
             self.set_color(self.h, s_x, v_x, write_fg=True)
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             dlog.log("ERR", where="strip_chroma", tb=traceback.format_exc())
 
     def _on_strip_chroma(self, value):
@@ -1667,9 +2038,14 @@ class HsvPickerPanel(QWidget):
     # ---- Oklab a/b 分量条（拖动只改本分量，明度与另一分量锁定）----
     def _apply_ab_visible(self):
         """按 show_ab 显示/收起 a/b 两行（标签 + 色条 + 数值框）。"""
-        for w in (getattr(self, "lbl_a", None), getattr(self, "strip_a", None),
-                  getattr(self, "edit_a", None), getattr(self, "lbl_b", None),
-                  getattr(self, "strip_b", None), getattr(self, "edit_b", None)):
+        for w in (
+            getattr(self, "lbl_a", None),
+            getattr(self, "strip_a", None),
+            getattr(self, "edit_a", None),
+            getattr(self, "lbl_b", None),
+            getattr(self, "strip_b", None),
+            getattr(self, "edit_b", None),
+        ):
             if w is not None and _alive(w):
                 w.setVisible(bool(self.show_ab))
         if _alive(getattr(self, "picker", None)):
@@ -1690,17 +2066,25 @@ class HsvPickerPanel(QWidget):
                 other = b0 if axis == "a" else a0
                 math_core.ab_axis_interval_seeded(L_ok, other, axis, seed=x0)
                 self._ab_gray_component_interval(axis, other, M0, x0, l_hint=L_ok)
-            except Exception:
-                dlog.log("ERR", where="strip_ab_press_precompute",
-                         tb=traceback.format_exc())
+            except (ArithmeticError, TypeError, ValueError):
+                dlog.log(
+                    "ERR", where="strip_ab_press_precompute", tb=traceback.format_exc()
+                )
         self._preview_begin()
         self._dbg_strip_tag = "ok" + axis
         # R11：拖 a/b 时明度锁住但色相在变，等明度线形状本来就会变；冻结只会给出过期信息，
         # 所以两条过点线都实时（不再与方块内中/右键、L/C 条的「锁定线冻结」一致）。
         self._freeze_picker_lines(None)
         if dlog.is_enabled():
-            dlog.log("STRIP_AB_DOWN", axis=axis, metric=metric, l=round(M0, 5),
-                     lok=round(L_ok, 5), a=round(a0, 5), b=round(b0, 5))
+            dlog.log(
+                "STRIP_AB_DOWN",
+                axis=axis,
+                metric=metric,
+                l=round(M0, 5),
+                lok=round(L_ok, 5),
+                a=round(a0, 5),
+                b=round(b0, 5),
+            )
 
     def _on_strip_ab(self, axis, value):
         """a/b 条拖动（或数值框提交）：固定「明度标准」的明度与另一分量，只改本分量。
@@ -1724,7 +2108,7 @@ class HsvPickerPanel(QWidget):
         else:
             M0, a0, b0 = ctx
             L_ok = getattr(self, "_strip_ab_Lok", None)
-            if L_ok is None:                 # 兼容外部直接塞入旧式 (L, a, b) 上下文
+            if L_ok is None:  # 兼容外部直接塞入旧式 (L, a, b) 上下文
                 L_ok = M0
             metric = getattr(self, "_strip_ab_metric", None) or "oklab"
         other = b0 if axis == "a" else a0
@@ -1736,36 +2120,51 @@ class HsvPickerPanel(QWidget):
             else:
                 # gray 路径：旧栅格区间包含当前分量时保持旧行为；
                 # 退化切片（如 h=60°,v=1 旧返回 (0,0) 不含 x0）改用 seed 精确区间。
-                iv_seeded = math_core.ab_axis_interval_seeded(L_ok, other, axis, seed=x0)
+                iv_seeded = math_core.ab_axis_interval_seeded(
+                    L_ok, other, axis, seed=x0
+                )
                 if iv_seeded is None:
-                    lo, hi = math_core.ab_axis_interval(L_ok, other, axis)   # 明确空区间兜底
+                    lo, hi = math_core.ab_axis_interval(
+                        L_ok, other, axis
+                    )  # 明确空区间兜底
                 else:
                     lo, hi = iv_seeded
             val = max(lo, min(hi, float(value)))
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             dlog.log("ERR", where="strip_ab_range", tb=traceback.format_exc())
             return
         if metric != "oklab":
             # R30：gray 口径下把本分量钳到「仍能解出目标灰阶」的区间端点。
             # 只动 gray 路径；oklab 路径的 val / L_use 一字不动。
             try:
-                gl, gh = self._ab_gray_component_interval(axis, other, M0, x0, l_hint=L_ok)
+                gl, gh = self._ab_gray_component_interval(
+                    axis, other, M0, x0, l_hint=L_ok
+                )
                 val = max(gl, min(gh, val))
-            except Exception:
+            except (ArithmeticError, TypeError, ValueError):
                 dlog.log("ERR", where="strip_ab_gray_iv", tb=traceback.format_exc())
         a, b = (val, b0) if axis == "a" else (a0, val)
         try:
             if metric == "oklab":
-                L_use = L_ok                     # 旧口径：按下时刻的 Oklab L 原样用
+                L_use = L_ok  # 旧口径：按下时刻的 Oklab L 原样用
             else:
                 L_use = self._solve_ab_L_metric(M0, metric, a, b)
             rgb = math_core.oklab_to_srgb(L_use, a, b)
             h, s, v = math_core.srgb_to_hsv(float(rgb[0]), float(rgb[1]), float(rgb[2]))
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
             dlog.log("ERR", where="strip_ab", tb=traceback.format_exc())
             return
-        dlog.log_throttled("STRIP_AB", 8, axis=axis, metric=metric, l=round(L_use, 5),
-                           a=round(a, 5), b=round(b, 5), lo=round(lo, 5), hi=round(hi, 5))
+        dlog.log_throttled(
+            "STRIP_AB",
+            8,
+            axis=axis,
+            metric=metric,
+            l=round(L_use, 5),
+            a=round(a, 5),
+            b=round(b, 5),
+            lo=round(lo, 5),
+            hi=round(hi, 5),
+        )
         self.set_color(h, s, v, write_fg=True)
 
     def _sync_old_entries(self):
@@ -1773,7 +2172,7 @@ class HsvPickerPanel(QWidget):
         self._sync_entries()
         self.edit_s.setText("%.2f" % (self.s * 100.0))
         self.edit_v.setText("%.2f" % (self.v * 100.0))
-        self.edit_hex.setText("#%02X%02X%02X" % self.picker_rgb())
+        self.edit_hex.setText("#{:02X}{:02X}{:02X}".format(*self.picker_rgb()))
 
     # ------------------------------------------------- 数值框回写
     # ------------------------------------------------- 数值框回写
@@ -1781,34 +2180,44 @@ class HsvPickerPanel(QWidget):
         self._editing_field = None
         self._entry_dragging = False
         self._dbg_ctx = "-"
-        self._update_hover_temp()    # 拖动结束：按当前悬停 + 按键 + 文本框焦点状态恢复预览
+        self._update_hover_temp()  # 拖动结束：按当前悬停 + 按键 + 文本框焦点状态恢复预览
         sender = self.sender()
         if sender is None:
             self._preview_start_countdown()
             return
         self.apply_entry_text(sender, sender.text())
-        self._preview_start_countdown()      # 提交结束才开始 2 秒倒计时
+        self._preview_start_countdown()  # 提交结束才开始 2 秒倒计时
 
     def apply_entry_text(self, sender, text):
         """把某个数值框的文本应用到当前颜色（可脱离 Qt 信号单独测试）。"""
         field = "?"
-        for name, widget in (("h", self.edit_h), ("s", self.edit_s), ("v", self.edit_v),
-                             ("hex", self.edit_hex), ("l", self.edit_l), ("c", self.edit_c),
-                             ("a", getattr(self, "edit_a", None)),
-                             ("b", getattr(self, "edit_b", None))):
+        for name, widget in (
+            ("h", self.edit_h),
+            ("s", self.edit_s),
+            ("v", self.edit_v),
+            ("hex", self.edit_hex),
+            ("l", self.edit_l),
+            ("c", self.edit_c),
+            ("a", getattr(self, "edit_a", None)),
+            ("b", getattr(self, "edit_b", None)),
+        ):
             if sender is widget:
                 field = name
                 break
         self._dbg_ctx = "entry_" + field
-        self._preview_begin()       # 本轮操作开始前的「上一次选色」
+        self._preview_begin()  # 本轮操作开始前的「上一次选色」
         dlog.log("ENTRY", field=field, text=text.strip())
         try:
             if sender is self.edit_h:
                 self.set_color(math_core.parse_hue(text), self.s, self.v, write_fg=True)
             elif sender is self.edit_s:
-                self.set_color(self.h, math_core.parse_ratio(text), self.v, write_fg=True)
+                self.set_color(
+                    self.h, math_core.parse_ratio(text), self.v, write_fg=True
+                )
             elif sender is self.edit_v:
-                self.set_color(self.h, self.s, math_core.parse_ratio(text), write_fg=True)
+                self.set_color(
+                    self.h, self.s, math_core.parse_ratio(text), write_fg=True
+                )
             elif sender is self.edit_hex:
                 r, g, b = math_core.parse_hex(text)
                 h, s, v = math_core.srgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
@@ -1834,10 +2243,12 @@ class HsvPickerPanel(QWidget):
         except (ValueError, TypeError, IndexError):
             dlog.log("ENTRY_BAD", field=field, text=text.strip())
             self._sync_entries()
-            self._status.setText(i18n.t("输入无法识别，已还原：%s",
-                                        "Unrecognized input, restored: %s") % text.strip())
+            self._status.setText(
+                i18n.t("输入无法识别，已还原：%s", "Unrecognized input, restored: %s")
+                % text.strip()
+            )
             return
-        self._push_history()          # 数值框提交成功也计入历史
+        self._push_history()  # 数值框提交成功也计入历史
 
     # ------------------------------------------------- 状态与当前色小色块
     def refresh_status(self):
@@ -1870,7 +2281,7 @@ class HsvPickerPanel(QWidget):
             return None
         try:
             return tuple(int(v) for v in math_core.parse_hex(colors[index]))
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     def _preview_anchor(self):
@@ -1883,10 +2294,16 @@ class HsvPickerPanel(QWidget):
         隐藏、被宿主内其它控件完全遮挡、已销毁或宽度为 0 时返回 None。
         """
         picker = getattr(self, "picker", None)
-        if picker is None or not _alive(picker) or picker.width() <= 0 or self.width() <= 0:
+        if (
+            picker is None
+            or not _alive(picker)
+            or picker.width() <= 0
+            or self.width() <= 0
+        ):
             return None
         try:
             from PyQt6.QtCore import QPoint, QRect
+
             if not picker.isVisible() or picker.visibleRegion().isEmpty():
                 return None
             picker_tl = picker.mapToGlobal(QPoint(0, 0))
@@ -1896,7 +2313,7 @@ class HsvPickerPanel(QWidget):
             if bottom - top < 1:
                 bottom = top + 1
             return QRect(int(panel_tl.x()), top, int(self.width()), bottom - top)
-        except Exception:
+        except (AttributeError, RuntimeError, TypeError):
             return None
 
     # ------------------------------------------------- 浮层跟随拾色器（150ms 重锚定）
@@ -1905,19 +2322,15 @@ class HsvPickerPanel(QWidget):
         timer = getattr(self, "_preview_follow", None)
         if timer is None:
             return
-        try:
+        with suppress(RuntimeError):
             if not timer.isActive():
                 timer.start()
-        except Exception:
-            pass
 
     def _preview_follow_stop(self):
         timer = getattr(self, "_preview_follow", None)
         if timer is not None:
-            try:
+            with suppress(RuntimeError):
                 timer.stop()
-            except Exception:
-                pass
 
     def _preview_follow_tick(self):
         """一次重锚定：拾色器没了/不可见就收起浮层；否则按新几何重走「右→左→下→上」。"""
@@ -1930,10 +2343,8 @@ class HsvPickerPanel(QWidget):
             self._preview_hide_now()
             self._preview_follow_stop()
             return
-        try:
+        with suppress(RuntimeError):
             ov.show_near(anchor)
-        except Exception:
-            pass
 
     def _preview_enabled(self):
         """当前模式是否要显示浮层（off = 完全不显示）。"""
@@ -1961,15 +2372,16 @@ class HsvPickerPanel(QWidget):
             self._preview_hide_now()
             return None
         if self._preview_last_rgb is _UNSET or self._preview_older_rgb is _UNSET:
-            self._preview_begin()      # 兜底：没走过 _preview_begin 的调用
+            self._preview_begin()  # 兜底：没走过 _preview_begin 的调用
         if start_countdown is None:
             start_countdown = not self._interacting()
         try:
             ov = self.preview_overlay()
             if not ov.isVisible():
                 ov.show_near(anchor)
-            ov.show_colors(self.picker_rgb(), self._preview_older_rgb,
-                           self._preview_last_rgb)
+            ov.show_colors(
+                self.picker_rgb(), self._preview_older_rgb, self._preview_last_rgb
+            )
             if self.preview_mode == "always":
                 ov.cancel_hide()
             elif start_countdown:
@@ -1978,7 +2390,7 @@ class HsvPickerPanel(QWidget):
                 ov.cancel_hide()
             self._preview_follow_start()
             return ov
-        except Exception:
+        except (AttributeError, RuntimeError, TypeError):
             return None
 
     def _preview_start_countdown(self):
@@ -1988,19 +2400,17 @@ class HsvPickerPanel(QWidget):
         ov = getattr(self, "_overlay", None)
         if ov is None or not _alive(ov) or not ov.isVisible():
             return
-        try:
+        with suppress(RuntimeError):
             if self.preview_mode == "always":
-                ov.cancel_hide()                 # 一直：不隐藏
+                ov.cancel_hide()  # 一直：不隐藏
                 return
             if self.preview_mode == "hover":
                 if getattr(self, "_picker_hovered", False):
-                    ov.cancel_hide()             # 鼠标仍在拾色器上：保持显示
+                    ov.cancel_hide()  # 鼠标仍在拾色器上：保持显示
                 else:
-                    self._preview_hide_now()     # 鼠标不在拾色器上：立即隐藏
+                    self._preview_hide_now()  # 鼠标不在拾色器上：立即隐藏
                 return
-            ov.hide_after(self._preview_delay_ms())   # 1 秒 / 2 秒
-        except Exception:
-            pass
+            ov.hide_after(self._preview_delay_ms())  # 1 秒 / 2 秒
 
     def _on_picker_hover_enter(self):
         """鼠标移进拾色器：仅在「悬停」模式显示（不改色也显示），并在拾色器内一直保持。"""
@@ -2027,10 +2437,8 @@ class HsvPickerPanel(QWidget):
         self._preview_follow_stop()
         ov = getattr(self, "_overlay", None)
         if ov is not None and _alive(ov):
-            try:
+            with suppress(RuntimeError):
                 ov.hide_now()
-            except Exception:
-                pass
 
     # ------------------------------------------------- T-53 全局临时切换键 + 悬停预览
     def set_temp_chroma_key(self, key, _broadcast=True):
@@ -2039,22 +2447,18 @@ class HsvPickerPanel(QWidget):
         if key not in keymap_core.MOD_IDS:
             key = "shift"
         self.temp_chroma_key = key
-        try:
+        with suppress(RuntimeError):
             Krita.instance().writeSetting("", TEMP_CHROMA_KEY_KEY, key)
-        except Exception:
-            pass
         act = (getattr(self, "temp_key_actions", None) or {}).get(key)
         if _alive(act) and not act.isChecked():
-            act.setChecked(True)          # 互斥组：其余项自动取消勾选
+            act.setChecked(True)  # 互斥组：其余项自动取消勾选
         if _alive(getattr(self, "picker", None)):
             self.picker.set_temp_chroma_key(key)
         self._update_hover_temp()
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("temp_chroma_key", key)
-                except Exception:
-                    pass
 
     def _kb_mod_id(self):
         """显式维护的 Shift/Ctrl/Alt 状态 -> MOD_ID。"""
@@ -2067,8 +2471,9 @@ class HsvPickerPanel(QWidget):
 
     def _hover_key_active(self):
         """当前修饰键是否包含全局临时切换键的全部位；none 恒为 False。"""
-        return keymap_core.mod_contains(self._kb_mod_id(),
-                                        getattr(self, "temp_chroma_key", "shift"))
+        return keymap_core.mod_contains(
+            self._kb_mod_id(), getattr(self, "temp_chroma_key", "shift")
+        )
 
     def _current_hover_mod_id(self):
         """当前显式修饰键状态 ID（与键表 MOD_IDS 同口径）。"""
@@ -2078,23 +2483,23 @@ class HsvPickerPanel(QWidget):
         """文本输入框有焦点时暂停悬停预览（Shift 打大写不闪烁）。"""
         try:
             from PyQt6.QtWidgets import QAbstractSpinBox, QApplication, QLineEdit
+
             w = QApplication.focusWidget()
             return isinstance(w, (QLineEdit, QAbstractSpinBox))
-        except Exception:
+        except (AttributeError, RuntimeError):
             return False
 
     def _cursor_inside_panel(self):
         """鼠标命中的控件是否属于本面板：widgetAt + parentWidget 父链；主面板与弹窗各自判定。"""
-        try:
+        with suppress(AttributeError, RuntimeError):
             from PyQt6.QtGui import QCursor
             from PyQt6.QtWidgets import QApplication
+
             w = QApplication.widgetAt(QCursor.pos())
             while w is not None:
                 if w is self:
                     return True
                 w = w.parentWidget()
-        except Exception:
-            pass
         return False
 
     def _update_hover_temp(self):
@@ -2102,13 +2507,13 @@ class HsvPickerPanel(QWidget):
         if not _alive(getattr(self, "picker", None)):
             return
         if self._interacting():
-            return                  # 拖动中口径按下定死，悬停刷新不得改（松手后由调用方重算）
+            return  # 拖动中口径按下定死，悬停刷新不得改（松手后由调用方重算）
         target = None
         if self._panel_hovered and not self._hover_suspended:
             try:
                 if not self._text_input_has_focus() and self._hover_key_active():
-                    target = ("abs" if self.chroma_mode == "rel" else "rel")
-            except Exception:
+                    target = "abs" if self.chroma_mode == "rel" else "rel"
+            except (AttributeError, RuntimeError):
                 target = None
         if self.picker.temp_chroma_mode != target:
             self.picker.set_temp_chroma_mode(target)
@@ -2122,8 +2527,8 @@ class HsvPickerPanel(QWidget):
 
     def _on_app_key_event(self, event):
         """KeyPress/KeyRelease -> 显式维护 Shift/Ctrl/Alt 状态，松开立刻清位。"""
-        try:
-            down = (event.type() == QEvent.Type.KeyPress)
+        with suppress(AttributeError, RuntimeError, TypeError):
+            down = event.type() == QEvent.Type.KeyPress
             key = event.key()
             if key == Qt.Key.Key_Shift:
                 self._kb_shift = down
@@ -2131,14 +2536,12 @@ class HsvPickerPanel(QWidget):
                 self._kb_ctrl = down
             elif key == Qt.Key.Key_Alt:
                 self._kb_alt = down
-        except Exception:
-            pass
 
     def _sync_kb_from_mouse(self, event):
         """鼠标事件自带 modifiers：补齐「进入应用前就已按住」的键，避免漏按。"""
         try:
             mods = event.modifiers()
-        except Exception:
+        except (AttributeError, RuntimeError):
             return
         self._kb_shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
         self._kb_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
@@ -2148,11 +2551,12 @@ class HsvPickerPanel(QWidget):
         """窗口重新激活 / 重新显示时按 Qt 当前修饰键状态校准一次（不在 KeyPress 过滤器里用）。"""
         try:
             from PyQt6.QtWidgets import QApplication
+
             app = QApplication.instance()
             if app is None:
                 return
             mods = app.keyboardModifiers()
-        except Exception:
+        except (AttributeError, RuntimeError):
             return
         self._kb_shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
         self._kb_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
@@ -2163,6 +2567,7 @@ class HsvPickerPanel(QWidget):
         if getattr(self, "_hover_filter_installed", False):
             return
         from PyQt6.QtWidgets import QApplication
+
         app = QApplication.instance()
         if app is None:
             return
@@ -2173,41 +2578,48 @@ class HsvPickerPanel(QWidget):
         """移除应用级事件过滤器（面板销毁时调用，避免残留钩子）。"""
         if not getattr(self, "_hover_filter_installed", False):
             return
-        try:
+        with suppress(RuntimeError):
             from PyQt6.QtWidgets import QApplication
+
             app = QApplication.instance()
             if app is not None:
                 app.removeEventFilter(self)
-        except Exception:
-            pass
         self._hover_filter_installed = False
 
     def eventFilter(self, obj, event):
         """应用级过滤器：刷新切换键悬停预览，不消费事件。"""
-        try:
+        with suppress(AttributeError, RuntimeError, TypeError):
             et = event.type()
             if et in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
                 self._on_app_key_event(event)
                 self._refresh_panel_hover()
-            elif et in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress,
-                        QEvent.Type.MouseButtonRelease, QEvent.Type.Wheel):
+            elif et in (
+                QEvent.Type.MouseMove,
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.MouseButtonRelease,
+                QEvent.Type.Wheel,
+            ):
                 self._sync_kb_from_mouse(event)
                 self._refresh_panel_hover()
-            elif et in (QEvent.Type.FocusIn, QEvent.Type.FocusOut, QEvent.Type.Enter, QEvent.Type.Leave):
+            elif et in (
+                QEvent.Type.FocusIn,
+                QEvent.Type.FocusOut,
+                QEvent.Type.Enter,
+                QEvent.Type.Leave,
+            ):
                 self._refresh_panel_hover()
-            elif et in (QEvent.Type.ApplicationDeactivate,
-                        QEvent.Type.WindowDeactivate):
+            elif et in (
+                QEvent.Type.ApplicationDeactivate,
+                QEvent.Type.WindowDeactivate,
+            ):
                 self._kb_clear()
                 if et == QEvent.Type.ApplicationDeactivate:
                     self._hover_suspended = True
                 self._update_hover_temp()
-            elif et in (QEvent.Type.ApplicationActivate,
-                        QEvent.Type.WindowActivate):
+            elif et in (QEvent.Type.ApplicationActivate, QEvent.Type.WindowActivate):
                 self._hover_suspended = False
-                self._sync_kb_from_app()   # 激活时校准一次；随后按键/鼠标事件继续维护
+                self._sync_kb_from_app()  # 激活时校准一次；随后按键/鼠标事件继续维护
                 self._refresh_panel_hover()
-        except Exception:
-            pass
         return super().eventFilter(obj, event)
 
     def enterEvent(self, event):
@@ -2222,27 +2634,23 @@ class HsvPickerPanel(QWidget):
         """面板销毁：清悬停预览 + 移除过滤器 + 收掉浮层，避免留下独立小窗/残留钩子。"""
         self._panel_hovered = False
         self._kb_clear()
-        try:
+        with suppress(RuntimeError):
             if _alive(getattr(self, "picker", None)):
                 self.picker.set_temp_chroma_mode(None)
-        except Exception:
-            pass
         self._remove_hover_filter()
         self._preview_follow_stop()
         ov = getattr(self, "_overlay", None)
         if ov is not None:
-            try:
+            with suppress(RuntimeError):
                 ov.hide()
                 ov.deleteLater()
-            except Exception:
-                pass
         self._overlay = None
 
     def hideEvent(self, event):
         self._panel_hovered = False
         self._hover_suspended = False
-        self._update_hover_temp()     # T-53：面板隐藏立即清悬停预览
-        self._preview_hide_now()      # 面板隐藏（弹窗关闭等）：浮层不单独飘着
+        self._update_hover_temp()  # T-53：面板隐藏立即清悬停预览
+        self._preview_hide_now()  # 面板隐藏（弹窗关闭等）：浮层不单独飘着
         super().hideEvent(event)
 
     # ------------------------------------------------- 二级菜单配置
@@ -2250,12 +2658,12 @@ class HsvPickerPanel(QWidget):
     def set_show_ab(self, checked, _broadcast=True):
         """显示/收起 Oklab a/b 分量条（默认开；设置持久化）。"""
         self.show_ab = bool(checked)
-        try:
+        with suppress(RuntimeError):
             Krita.instance().writeSetting("", SHOW_AB_KEY, "1" if self.show_ab else "0")
-        except Exception:
-            pass
-        if _alive(getattr(self, "act_show_ab", None)) and \
-                self.act_show_ab.isChecked() != self.show_ab:
+        if (
+            _alive(getattr(self, "act_show_ab", None))
+            and self.act_show_ab.isChecked() != self.show_ab
+        ):
             self.act_show_ab.blockSignals(True)
             self.act_show_ab.setChecked(self.show_ab)
             self.act_show_ab.blockSignals(False)
@@ -2263,34 +2671,30 @@ class HsvPickerPanel(QWidget):
         self._sync_entries()
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("show_ab", self.show_ab)
-                except Exception:
-                    pass
 
     def set_ab_mode(self, mode, _broadcast=True):
         """a/b 条量程口径：box=当前明度切片包围盒（默认，刻度稳）/ line=单线可行区间。"""
         self.ab_mode = mode if mode in ("box", "line") else "box"
-        try:
+        with suppress(RuntimeError):
             Krita.instance().writeSetting("", AB_MODE_KEY, self.ab_mode)
-        except Exception:
-            pass
         for strip in (getattr(self, "strip_a", None), getattr(self, "strip_b", None)):
             if _alive(strip):
                 strip.set_mode(self.ab_mode)
-        want_line = (self.ab_mode == "line")
-        if _alive(getattr(self, "act_ab_line", None)) and \
-                self.act_ab_line.isChecked() != want_line:
+        want_line = self.ab_mode == "line"
+        if (
+            _alive(getattr(self, "act_ab_line", None))
+            and self.act_ab_line.isChecked() != want_line
+        ):
             self.act_ab_line.blockSignals(True)
             self.act_ab_line.setChecked(want_line)
             self.act_ab_line.blockSignals(False)
         self._sync_entries()
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("ab_mode", self.ab_mode)
-                except Exception:
-                    pass
 
     def set_ab_mode_line(self, checked, _broadcast=True):
         """菜单勾选：勾=满量程可达（line）；不勾=切片包围盒（box，默认）。"""
@@ -2302,18 +2706,34 @@ class HsvPickerPanel(QWidget):
 
         mode 缺省 = 持久口径；面板临时口径显示期间由 `_sync_entries` 传入生效口径。
         """
-        mode = self.chroma_mode if mode is None else \
-            ("abs" if str(mode) == "abs" else "rel")
+        mode = (
+            self.chroma_mode
+            if mode is None
+            else ("abs" if str(mode) == "abs" else "rel")
+        )
         if mode == "rel":
-            tip = i18n.t("相对彩度 C_rel = C / C_max(L,h)（0~1；1 = 该明度/色相下最饱和）",
-                         "Relative chroma C_rel = C / C_max(L,h) (0-1; 1 = most saturated)")
+            tip = i18n.t(
+                "相对彩度 C_rel = C / C_max(L,h)（0~1；1 = 该明度/色相下最饱和）",
+                "Relative chroma C_rel = C / C_max(L,h) (0-1; 1 = most saturated)",
+            )
         else:
-            rng = i18n.t("满量程 0~C_max(L,h)", "full range 0 to C_max(L,h)") \
-                if self.chroma_full else i18n.t("固定量程 0~0.4", "fixed range 0-0.4")
-            tip = i18n.t("绝对彩度 C = √(a²+b²)（Oklab 口径；%s）",
-                         "Absolute chroma C = sqrt(a^2+b^2) (Oklab; %s)") % rng
-        for w in (getattr(self, "lbl_c", None), getattr(self, "edit_c", None),
-                  getattr(self, "strip_c", None)):
+            rng = (
+                i18n.t("满量程 0~C_max(L,h)", "full range 0 to C_max(L,h)")
+                if self.chroma_full
+                else i18n.t("固定量程 0~0.4", "fixed range 0-0.4")
+            )
+            tip = (
+                i18n.t(
+                    "绝对彩度 C = √(a²+b²)（Oklab 口径；%s）",
+                    "Absolute chroma C = sqrt(a^2+b^2) (Oklab; %s)",
+                )
+                % rng
+            )
+        for w in (
+            getattr(self, "lbl_c", None),
+            getattr(self, "edit_c", None),
+            getattr(self, "strip_c", None),
+        ):
             if w is not None and _alive(w):
                 w.setToolTip(tip)
 
@@ -2321,34 +2741,32 @@ class HsvPickerPanel(QWidget):
         """C 条口径：rel = 相对彩度 C_rel（默认）/ abs = 绝对彩度 C；设置持久化。"""
         mode = "abs" if str(mode) == "abs" else "rel"
         self.chroma_mode = mode
-        try:
+        with suppress(RuntimeError):
             Krita.instance().writeSetting("", CHROMA_MODE_KEY, mode)
-        except Exception:
-            pass
         act = (getattr(self, "chroma_actions", None) or {}).get(mode)
         if _alive(act) and not act.isChecked():
-            act.setChecked(True)          # 互斥组：其余项自动取消勾选
+            act.setChecked(True)  # 互斥组：其余项自动取消勾选
         if _alive(getattr(self, "strip_c", None)):
             self.strip_c.set_mode(self.chroma_mode, self.chroma_full)
         self._apply_chroma_label()
         self._sync_entries()
-        self._update_hover_temp()      # T-53：持久口径变化时，若正在悬停预览按新口径重算另一口径
+        self._update_hover_temp()  # T-53：持久口径变化时，若正在悬停预览按新口径重算另一口径
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("chroma_mode", self.chroma_mode)
-                except Exception:
-                    pass
 
     def set_chroma_full(self, checked, _broadcast=True):
         """绝对口径的 C 条量程：勾 = 满量程 [0, C_max]（无死区）；不勾（默认）= 固定 [0, 0.4]。"""
         self.chroma_full = bool(checked)
-        try:
-            Krita.instance().writeSetting("", CHROMA_FULL_KEY, "1" if self.chroma_full else "0")
-        except Exception:
-            pass
-        if _alive(getattr(self, "act_c_full", None)) and \
-                self.act_c_full.isChecked() != self.chroma_full:
+        with suppress(RuntimeError):
+            Krita.instance().writeSetting(
+                "", CHROMA_FULL_KEY, "1" if self.chroma_full else "0"
+            )
+        if (
+            _alive(getattr(self, "act_c_full", None))
+            and self.act_c_full.isChecked() != self.chroma_full
+        ):
             self.act_c_full.blockSignals(True)
             self.act_c_full.setChecked(self.chroma_full)
             self.act_c_full.blockSignals(False)
@@ -2358,10 +2776,8 @@ class HsvPickerPanel(QWidget):
         self._sync_entries()
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("chroma_full", self.chroma_full)
-                except Exception:
-                    pass
 
     def set_abs_cluster_mode(self, mode, _broadcast=True):
         """绝对 C 线簇密度：fixed（默认，0.02~0.36 共 18 档）/ even（按色相纯色 C_max 等分 9 档）。
@@ -2370,12 +2786,10 @@ class HsvPickerPanel(QWidget):
         """
         mode = "even" if str(mode) == "even" else "fixed"
         self.abs_cluster_mode = mode
-        try:
+        with suppress(RuntimeError):
             Krita.instance().writeSetting("", CHROMA_ABS_CLUSTER_KEY, mode)
-        except Exception:
-            pass
         act = getattr(self, "act_c_cluster_even", None)
-        want_even = (mode != "fixed")
+        want_even = mode != "fixed"
         if _alive(act) and act.isChecked() != want_even:
             act.blockSignals(True)
             act.setChecked(want_even)
@@ -2385,10 +2799,8 @@ class HsvPickerPanel(QWidget):
         self._sync_entries()
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("chroma_abs_cluster", self.abs_cluster_mode)
-                except Exception:
-                    pass
 
     def set_abs_cluster_even(self, checked, _broadcast=True):
         """菜单勾选：勾 = even（等分 9 档）/ 不勾 = fixed（默认，18 档）。"""
@@ -2404,19 +2816,29 @@ class HsvPickerPanel(QWidget):
             self.strip_l.metric = m
             self.strip_l._cache_key = None
             self.strip_l.update()
-            self.strip_l.setToolTip(i18n.t(
-                "明度条（灰阶口径）：左黑右白，读数 = srgb_encode(Y)" if m == "gray"
-                else "明度条：左黑右白，读数 = Oklab L",
-                "Lightness strip (grayscale): dark to light, readout = srgb_encode(Y)"
-                if m == "gray" else "Lightness strip: dark to light, readout = Oklab L"))
+            self.strip_l.setToolTip(
+                i18n.t(
+                    "明度条（灰阶口径）：左黑右白，读数 = srgb_encode(Y)"
+                    if m == "gray"
+                    else "明度条：左黑右白，读数 = Oklab L",
+                    "Lightness strip (grayscale): dark to light, readout = srgb_encode(Y)"
+                    if m == "gray"
+                    else "Lightness strip: dark to light, readout = Oklab L",
+                )
+            )
         if _alive(getattr(self, "strip_c", None)):
             self.strip_c.set_metric(m)
         if _alive(getattr(self, "lbl_l", None)):
-            self.lbl_l.setToolTip(i18n.t(
-                "灰阶码值 srgb_encode(Y)（0~1；Krita 软打样灰块口径）" if m == "gray"
-                else "Oklab 明度 L（0~1）",
-                "Grayscale code value srgb_encode(Y) (0-1; Krita soft-proof gray)"
-                if m == "gray" else "Oklab lightness L (0-1)"))
+            self.lbl_l.setToolTip(
+                i18n.t(
+                    "灰阶码值 srgb_encode(Y)（0~1；Krita 软打样灰块口径）"
+                    if m == "gray"
+                    else "Oklab 明度 L（0~1）",
+                    "Grayscale code value srgb_encode(Y) (0-1; Krita soft-proof gray)"
+                    if m == "gray"
+                    else "Oklab lightness L (0-1)",
+                )
+            )
 
     def set_lightness_metric(self, mode, _broadcast=True):
         """明度标准：oklab = Oklab L（默认，零影响）/ gray = 灰阶码值（色彩校样口径）。
@@ -2425,32 +2847,29 @@ class HsvPickerPanel(QWidget):
         """
         mode = "gray" if str(mode) == "gray" else "oklab"
         self.lightness_metric = mode
-        try:
+        with suppress(RuntimeError):
             Krita.instance().writeSetting("", LIGHTNESS_METRIC_KEY, mode)
-        except Exception:
-            pass
         act = (getattr(self, "metric_actions", None) or {}).get(mode)
         if _alive(act) and not act.isChecked():
-            act.setChecked(True)          # 互斥组：其余项自动取消勾选
+            act.setChecked(True)  # 互斥组：其余项自动取消勾选
         self._apply_lightness_metric()
         self._sync_entries()
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("lightness_metric", mode)
-                except Exception:
-                    pass
 
     def set_show_unreachable(self, checked, _broadcast=True):
         """色环「不可达色相」提示（默认开）：只叠细斜纹、不填灰底，不影响点击/拖动。"""
         self.show_unreachable = bool(checked)
-        try:
-            Krita.instance().writeSetting("", SHOW_UNREACHABLE_KEY,
-                                          "1" if self.show_unreachable else "0")
-        except Exception:
-            pass
-        if _alive(getattr(self, "act_unreachable", None)) and \
-                self.act_unreachable.isChecked() != self.show_unreachable:
+        with suppress(RuntimeError):
+            Krita.instance().writeSetting(
+                "", SHOW_UNREACHABLE_KEY, "1" if self.show_unreachable else "0"
+            )
+        if (
+            _alive(getattr(self, "act_unreachable", None))
+            and self.act_unreachable.isChecked() != self.show_unreachable
+        ):
             self.act_unreachable.blockSignals(True)
             self.act_unreachable.setChecked(self.show_unreachable)
             self.act_unreachable.blockSignals(False)
@@ -2458,30 +2877,24 @@ class HsvPickerPanel(QWidget):
             self.picker.set_show_unreachable(self.show_unreachable)
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("unreachable", self.show_unreachable)
-                except Exception:
-                    pass
 
     # ------------------------------------------------- 自定义按键表（R14）
     def set_keymap(self, keymap, _broadcast=True):
         """写入自定义按键表：即时生效 + 持久化 + 广播到对端面板。"""
         self.keymap = keymap_core.normalize(keymap)
-        try:
+        with suppress(RuntimeError):
             Krita.instance().writeSetting("", KEYMAP_KEY, keymap_core.dump(self.keymap))
-        except Exception:
-            pass
         self._apply_keymap()
-        self._update_hover_temp()      # T-53：键表精确行可能变化，立即重算悬停预览
+        self._update_hover_temp()  # T-53：键表精确行可能变化，立即重算悬停预览
         dlg = getattr(self, "_keymap_dialog", None)
         if _alive(dlg) and dlg.keymap != self.keymap:
             dlg.set_keymap(self.keymap)
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("keymap", self.keymap)
-                except Exception:
-                    pass
 
     def reset_keymap(self, _broadcast=True):
         """恢复默认按键表并即时生效。"""
@@ -2491,8 +2904,15 @@ class HsvPickerPanel(QWidget):
         """把当前按键表灌进拾色器 / 四条色条 / 可拖动数值框。"""
         if _alive(getattr(self, "picker", None)):
             self.picker.set_keymap(self.keymap)
-        for name in ("strip_l", "strip_c", "strip_a", "strip_b",
-                     "edit_h", "edit_s", "edit_v"):
+        for name in (
+            "strip_l",
+            "strip_c",
+            "strip_a",
+            "strip_b",
+            "edit_h",
+            "edit_s",
+            "edit_v",
+        ):
             widget = getattr(self, name, None)
             if widget is not None and hasattr(widget, "set_keymap"):
                 widget.set_keymap(self.keymap)
@@ -2503,8 +2923,11 @@ class HsvPickerPanel(QWidget):
 
         与弹窗窗口标志同口径；「按键功能…」对话框打开时按此继承置顶。
         """
-        return bool(self._supports_global_top and getattr(self, "always_on_top", True)
-                    and not getattr(self, "auto_close_popup", True))
+        return bool(
+            self._supports_global_top
+            and getattr(self, "always_on_top", True)
+            and not getattr(self, "auto_close_popup", True)
+        )
 
     def _keymap_parent(self):
         """「按键功能…」对话框的宿主：弹窗内打开用弹窗，Docker 内打开用 Docker 面板。"""
@@ -2522,13 +2945,12 @@ class HsvPickerPanel(QWidget):
         """打开/复用「按键功能…」对话框（R18：继承实际置顶 + 宿主作 parent）。"""
         dlg = getattr(self, "_keymap_dialog", None)
         if not _alive(dlg):
-            dlg = keymap_dialog.KeymapDialog(self._keymap_parent(),
-                                             on_change=self.set_keymap)
+            dlg = keymap_dialog.KeymapDialog(
+                self._keymap_parent(), on_change=self.set_keymap
+            )
             self._keymap_dialog = dlg
-            try:
+            with suppress(RuntimeError):
                 dlg.finished.connect(self._on_keymap_dialog_finished)
-            except Exception:
-                pass
         self._keymap_dialog_wanted = True
         self._keymap_dialog_hidden_by_host = False
         dlg.apply_effective_top(self.effective_top())
@@ -2558,34 +2980,29 @@ class HsvPickerPanel(QWidget):
             try:
                 visible = bool(host.isVisible())
                 minimized = bool(host.isMinimized()) or bool(
-                    host.windowState() & Qt.WindowState.WindowMinimized)
-            except Exception:
+                    host.windowState() & Qt.WindowState.WindowMinimized
+                )
+            except (AttributeError, RuntimeError):
                 visible, minimized = True, False
         if minimized:
             if dlg.isVisible():
                 self._keymap_dialog_hidden_by_host = True
-                try:
+                with suppress(RuntimeError):
                     dlg.hide()
-                except Exception:
-                    pass
             return
         if not visible:
             # 宿主隐藏/关闭：对话框一并关闭（之后宿主再显示也不再自动弹出）
             self._keymap_dialog_wanted = False
             self._keymap_dialog_hidden_by_host = False
-            try:
+            with suppress(RuntimeError):
                 dlg.close()
-            except Exception:
-                pass
             return
         if getattr(self, "_keymap_dialog_hidden_by_host", False):
             self._keymap_dialog_hidden_by_host = False
             if not dlg.isVisible():
-                try:
+                with suppress(RuntimeError):
                     dlg.show()
                     dlg.raise_()
-                except Exception:
-                    pass
 
     def _refresh_keymap_dialog(self):
         """按键表变化时，若对话框已打开则实时刷新。"""
@@ -2597,10 +3014,8 @@ class HsvPickerPanel(QWidget):
         """置顶设置变化时，若「按键功能…」对话框已打开则实时刷新窗口标志（R18）。"""
         dlg = getattr(self, "_keymap_dialog", None)
         if _alive(dlg):
-            try:
+            with suppress(RuntimeError):
                 dlg.apply_effective_top(self.effective_top())
-            except Exception:
-                pass
 
     # ------------------------------------------------- 浮层选项（持久化 + 广播）
     def set_preview_mode(self, mode, _broadcast=True):
@@ -2609,25 +3024,25 @@ class HsvPickerPanel(QWidget):
         if mode not in PREVIEW_MODES:
             mode = PREVIEW_DEFAULT_MODE
         self.preview_mode = mode
-        try:
+        with suppress(RuntimeError):
             Krita.instance().writeSetting("", PREVIEW_MODE_KEY, mode)
-        except Exception:
-            pass
         act = (getattr(self, "preview_actions", None) or {}).get(mode)
         if _alive(act) and not act.isChecked():
-            act.setChecked(True)          # 互斥组：其余项自动取消勾选
+            act.setChecked(True)  # 互斥组：其余项自动取消勾选
         if mode == "off":
             self._preview_hide_now()
         elif mode == "always":
-            self._preview_update(start_countdown=False)      # 立刻显示并保持
-        elif getattr(self, "_overlay", None) is not None and                 _alive(self._overlay) and self._overlay.isVisible():
-            self._preview_start_countdown()                  # 显示中切 1s/2s：按新时长立即计时
+            self._preview_update(start_countdown=False)  # 立刻显示并保持
+        elif (
+            getattr(self, "_overlay", None) is not None
+            and _alive(self._overlay)
+            and self._overlay.isVisible()
+        ):
+            self._preview_start_countdown()  # 显示中切 1s/2s：按新时长立即计时
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("preview_mode", mode)
-                except Exception:
-                    pass
 
     def set_view_flag(self, which, value):
         """跨面板同步设置项（不回传，避免回环）。"""
@@ -2673,8 +3088,11 @@ class HsvPickerPanel(QWidget):
                 self.act_debug.blockSignals(True)
                 self.act_debug.setChecked(self.debug_log)
                 self.act_debug.blockSignals(False)
-            self.act_debug.setText(i18n.t("诊断日志（开启中）", "Diagnostic log (on)")
-                                   if self.debug_log else i18n.t("诊断日志", "Diagnostic log"))
+            self.act_debug.setText(
+                i18n.t("诊断日志（开启中）", "Diagnostic log (on)")
+                if self.debug_log
+                else i18n.t("诊断日志", "Diagnostic log")
+            )
         if self.debug_log:
             dlog.enable(True)
             self._dbg_session()
@@ -2683,23 +3101,27 @@ class HsvPickerPanel(QWidget):
             dlog.enable(False)
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("debug_log", self.debug_log)
-                except Exception:
-                    pass
 
     def show_about_dialog(self):
         """设置菜单「关于馍馍拾色器」：slogan / 版本 / 许可 / 第三方依赖。"""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle(i18n.t("关于馍馍拾色器", "About Momo Color Picker"))
-        box.setText(i18n.t(
-            "馍馍拾色器：更适合HSV宝宝的OKLAB/OKLCH拾色器",
-            "Momo Color Picker: a more HSV-friendly OKLAB/OKLCH picker"))
-        box.setInformativeText(i18n.t(
-            "版本：%s\n许可：GPL-3.0-or-later\n第三方：numpy（BSD-3-Clause）",
-            "Version: %s\nLicense: GPL-3.0-or-later\nThird-party: numpy (BSD-3-Clause)")
-            % __version__)
+        box.setText(
+            i18n.t(
+                "馍馍拾色器：更适合HSV宝宝的OKLAB/OKLCH拾色器",
+                "Momo Color Picker: a more HSV-friendly OKLAB/OKLCH picker",
+            )
+        )
+        box.setInformativeText(
+            i18n.t(
+                "版本：%s\n许可：GPL-3.0-or-later\n第三方：numpy（BSD-3-Clause）",
+                "Version: %s\nLicense: GPL-3.0-or-later\nThird-party: numpy (BSD-3-Clause)",
+            )
+            % __version__
+        )
         box.setStandardButtons(QMessageBox.StandardButton.Ok)
         box.exec()
 
@@ -2709,10 +3131,18 @@ class HsvPickerPanel(QWidget):
             return
         try:
             ver = str(Krita.instance().version())
-        except Exception:
+        except RuntimeError:
             ver = "-"
-        dlog.log("SES", panel=self._dbg_name, krita=ver, w=self.width(), h=self.height(),
-                 hue=round(self.h, 3), sat=round(self.s, 5), val=round(self.v, 6))
+        dlog.log(
+            "SES",
+            panel=self._dbg_name,
+            krita=ver,
+            w=self.width(),
+            h=self.height(),
+            hue=round(self.h, 3),
+            sat=round(self.s, 5),
+            val=round(self.v, 6),
+        )
 
     def _dbg_color(self, write_fg, ctx=None):
         """set_color 末尾采样：记录状态并标出 >0.02 的明度跳变（仅日志开启时有开销）。
@@ -2723,20 +3153,38 @@ class HsvPickerPanel(QWidget):
             return
         ctx = ctx or self._dbg_ctx
         try:
-            L = float(math_core.lightness(self.h, self.s, self.v, self.lightness_metric))
-        except Exception:
+            L = float(
+                math_core.lightness(self.h, self.s, self.v, self.lightness_metric)
+            )
+        except (ArithmeticError, TypeError, ValueError):
             return
         prev = self._dbg_last_l
         delta = None if prev is None else (L - prev)
-        hex_text = "#%02X%02X%02X" % self.picker_rgb()
-        dlog.log_throttled("SET", 8, ctx=ctx, h=round(self.h, 3), s=round(self.s, 5),
-                           v=round(self.v, 6), L=round(L, 5),
-                           dL=(None if delta is None else round(delta, 5)),
-                           hex=hex_text, wfg=int(bool(write_fg)))
+        hex_text = "#{:02X}{:02X}{:02X}".format(*self.picker_rgb())
+        dlog.log_throttled(
+            "SET",
+            8,
+            ctx=ctx,
+            h=round(self.h, 3),
+            s=round(self.s, 5),
+            v=round(self.v, 6),
+            L=round(L, 5),
+            dL=(None if delta is None else round(delta, 5)),
+            hex=hex_text,
+            wfg=int(bool(write_fg)),
+        )
         if delta is not None and abs(delta) > 0.02:
-            dlog.log("JUMP", ctx=ctx, L=round(L, 5), L_prev=round(prev, 5),
-                     dL=round(delta, 5), h=round(self.h, 3), s=round(self.s, 5),
-                     v=round(self.v, 6), hex=hex_text)
+            dlog.log(
+                "JUMP",
+                ctx=ctx,
+                L=round(L, 5),
+                L_prev=round(prev, 5),
+                dL=round(delta, 5),
+                h=round(self.h, 3),
+                s=round(self.s, 5),
+                v=round(self.v, 6),
+                hex=hex_text,
+            )
         self._dbg_last_l = L
 
     def set_auto_close_popup(self, checked, _broadcast=True):
@@ -2746,30 +3194,30 @@ class HsvPickerPanel(QWidget):
         本项开着时置顶项只是**置灰**（此状态下无意义），但记忆值保留。
         """
         self.auto_close_popup = bool(checked)
-        try:
-            Krita.instance().writeSetting("", AUTO_CLOSE_KEY, "1" if self.auto_close_popup else "0")
-        except Exception:
-            pass
-        if _alive(getattr(self, "act_auto_close", None)):
-            if self.act_auto_close.isChecked() != self.auto_close_popup:
-                self.act_auto_close.blockSignals(True)
-                self.act_auto_close.setChecked(self.auto_close_popup)
-                self.act_auto_close.blockSignals(False)
+        with suppress(RuntimeError):
+            Krita.instance().writeSetting(
+                "", AUTO_CLOSE_KEY, "1" if self.auto_close_popup else "0"
+            )
+        if (
+            _alive(getattr(self, "act_auto_close", None))
+            and self.act_auto_close.isChecked() != self.auto_close_popup
+        ):
+            self.act_auto_close.blockSignals(True)
+            self.act_auto_close.setChecked(self.auto_close_popup)
+            self.act_auto_close.blockSignals(False)
         if _alive(getattr(self, "act_on_top", None)):
-            self.act_on_top.setEnabled(self._supports_global_top and not self.auto_close_popup)
+            self.act_on_top.setEnabled(
+                self._supports_global_top and not self.auto_close_popup
+            )
         hook = getattr(self, "on_top_hook", None)
         if hook is not None:
-            try:
-                hook()          # 实际窗口标志 = 记忆值 AND not 自动关闭
-            except Exception:
-                pass
-        self._refresh_keymap_dialog_top()          # R18：已打开的「按键功能」同步置顶
+            with suppress(RuntimeError):
+                hook()  # 实际窗口标志 = 记忆值 AND not 自动关闭
+        self._refresh_keymap_dialog_top()  # R18：已打开的「按键功能」同步置顶
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("auto_close", self.auto_close_popup)
-                except Exception:
-                    pass
 
     def set_always_on_top(self, checked, _broadcast=True):
         """弹出面板是否置顶（弹窗会立即应用窗口标志）。
@@ -2778,54 +3226,54 @@ class HsvPickerPanel(QWidget):
         自动关闭开着时只是菜单项置灰，真实值仍保留。
         """
         self.always_on_top = bool(checked)
-        try:
-            Krita.instance().writeSetting("", ON_TOP_KEY, "1" if self.always_on_top else "0")
-        except Exception:
-            pass
+        with suppress(RuntimeError):
+            Krita.instance().writeSetting(
+                "", ON_TOP_KEY, "1" if self.always_on_top else "0"
+            )
         if _alive(getattr(self, "act_on_top", None)):
             if self.act_on_top.isChecked() != self.always_on_top:
                 self.act_on_top.blockSignals(True)
                 self.act_on_top.setChecked(self.always_on_top)
                 self.act_on_top.blockSignals(False)
-            self.act_on_top.setEnabled(self._supports_global_top and not self.auto_close_popup)
+            self.act_on_top.setEnabled(
+                self._supports_global_top and not self.auto_close_popup
+            )
         hook = getattr(self, "on_top_hook", None)
         if hook is not None:
-            try:
+            with suppress(RuntimeError):
                 hook()
-            except Exception:
-                pass
-        self._refresh_keymap_dialog_top()          # R18：已打开的「按键功能」同步置顶
+        self._refresh_keymap_dialog_top()  # R18：已打开的「按键功能」同步置顶
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("on_top", self.always_on_top)
-                except Exception:
-                    pass
 
     def set_popup_at_mouse(self, checked, _broadcast=True):
         """弹出位置是否跟随鼠标（默认开；放不下时回退 Krita 窗口中心）。"""
         self.popup_at_mouse = bool(checked)
-        try:
-            Krita.instance().writeSetting("", POPUP_AT_MOUSE_KEY,
-                                          "1" if self.popup_at_mouse else "0")
-        except Exception:
-            pass
-        if _alive(getattr(self, "act_mouse_pos", None)):
-            if self.act_mouse_pos.isChecked() != self.popup_at_mouse:
-                self.act_mouse_pos.blockSignals(True)
-                self.act_mouse_pos.setChecked(self.popup_at_mouse)
-                self.act_mouse_pos.blockSignals(False)
+        with suppress(RuntimeError):
+            Krita.instance().writeSetting(
+                "", POPUP_AT_MOUSE_KEY, "1" if self.popup_at_mouse else "0"
+            )
+        if (
+            _alive(getattr(self, "act_mouse_pos", None))
+            and self.act_mouse_pos.isChecked() != self.popup_at_mouse
+        ):
+            self.act_mouse_pos.blockSignals(True)
+            self.act_mouse_pos.setChecked(self.popup_at_mouse)
+            self.act_mouse_pos.blockSignals(False)
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("popup_at_mouse", self.popup_at_mouse)
-                except Exception:
-                    pass
 
     def _interacting(self):
         """本面板是否正在拖动（用于隔离对端同步与回读，避免拖动中被覆盖）。"""
-        return bool(self._picking or getattr(self, "_strip_active", False)
-                    or getattr(self, "_entry_dragging", False))
+        return bool(
+            self._picking
+            or getattr(self, "_strip_active", False)
+            or getattr(self, "_entry_dragging", False)
+        )
 
     def set_show_clusters(self, checked, _broadcast=True):
         self.show_clusters = bool(checked)
@@ -2834,10 +3282,8 @@ class HsvPickerPanel(QWidget):
         self.picker.set_show_clusters(self.show_clusters)
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("clusters", self.show_clusters)
-                except Exception:
-                    pass
 
     def set_show_lines(self, checked, _broadcast=True):
         self.show_lines = bool(checked)
@@ -2846,10 +3292,10 @@ class HsvPickerPanel(QWidget):
         self.picker.set_show_lines(self.show_lines)
         if _broadcast:
             for cb in getattr(self, "view_listeners", []) or []:
-                try:
+                with suppress(RuntimeError):
                     cb("lines", self.show_lines)
-                except Exception:
-                    pass
+
+
 class HsvPickerDocker(DockWidget):
     """Krita 面板形态的拾色器。"""
 
@@ -2857,9 +3303,10 @@ class HsvPickerDocker(DockWidget):
         super().__init__()
         self.setWindowTitle(i18n.t("馍馍拾色器", "Momo Color Picker"))
         self.panel = HsvPickerPanel(self, dbg_name="docker")
-        self.panel.dialog_host = self        # R18：从 Docker 打开「按键功能」时以 Docker 为 parent
+        self.panel.dialog_host = (
+            self  # R18：从 Docker 打开「按键功能」时以 Docker 为 parent
+        )
         self.setWidget(self.panel)
-        global _EXTENSION
         if _EXTENSION is not None:
             _EXTENSION.attach_docker(self)
         _log("HsvPickerDocker.__init__")
@@ -2867,29 +3314,23 @@ class HsvPickerDocker(DockWidget):
     # Krita 每次切换画布/视图都会回调；签名必须带 canvas
     def canvasChanged(self, canvas):
         view = canvas.view() if canvas is not None else None
-        _log("canvasChanged view=%r" % (view,))
+        _log(f"canvasChanged view={view!r}")
         self.panel.set_view(view)
         for sink in list(getattr(self.panel, "view_sinks", []) or []):
-            try:
+            with suppress(RuntimeError):
                 sink.set_view(view)
-            except Exception:
-                pass
 
     # R24：Docker 隐藏/关闭 -> 「按键功能」对话框一并关闭；最小化 -> 隐藏、恢复 -> 显示
     def hideEvent(self, event):
         super().hideEvent(event)
-        try:
+        with suppress(RuntimeError):
             self.panel._sync_keymap_dialog_visibility()
-        except Exception:
-            pass
 
     def changeEvent(self, event):
         super().changeEvent(event)
-        try:
+        with suppress(RuntimeError):
             if event.type() == QEvent.Type.WindowStateChange:
                 self.panel._sync_keymap_dialog_visibility()
-        except Exception:
-            pass
 
 
 class _QuitCloseFilter(QObject):
@@ -2904,19 +3345,18 @@ class _QuitCloseFilter(QObject):
         self._ext = extension
 
     def eventFilter(self, obj, event):
-        try:
+        with suppress(AttributeError, RuntimeError, TypeError):
             if event.type() != QEvent.Type.Close:
                 return False
             from PyQt6.QtWidgets import QMainWindow
+
             if not isinstance(obj, QMainWindow):
                 return False
             if not obj.isVisible():
-                return False                     # 隐藏窗口被关掉不算「最后一个窗口」
+                return False  # 隐藏窗口被关掉不算「最后一个窗口」
             if self._ext._is_last_visible_main_window(obj):
                 self._ext._close_popup_for_quit()
-        except Exception:
-            pass
-        return False                             # 不消费，主窗口照常关闭
+        return False  # 不消费，主窗口照常关闭
 
 
 class HsvPickerExtension(Extension):
@@ -2931,35 +3371,44 @@ class HsvPickerExtension(Extension):
         pass
 
     def createActions(self, window):
-        action = window.createAction(ACTION_POPUP_ID,
-                                     i18n.t("弹出馍馍拾色器", "Show Momo Color Picker"))
-        action.setToolTip(i18n.t("临时弹出拾色器；再次按下快捷键或点击面板外隐藏",
-                                 "Temporarily show the picker; press the shortcut again or click outside to hide"))
+        action = window.createAction(
+            ACTION_POPUP_ID, i18n.t("弹出馍馍拾色器", "Show Momo Color Picker")
+        )
+        action.setToolTip(
+            i18n.t(
+                "临时弹出拾色器；再次按下快捷键或点击面板外隐藏",
+                "Temporarily show the picker; press the shortcut again or click outside to hide",
+            )
+        )
         if not action.shortcut():
             action.setShortcut(DEFAULT_POPUP_SHORTCUT)
         action.triggered.connect(self.toggle_popup)
         self._install_app_shortcut_filter()
-        self._install_quit_hooks()          # T-54：每个主窗口都会调一次，内部只挂一次
-        _log("createActions 完成 shortcut=%r" % (action.shortcut(),))
+        self._install_quit_hooks()  # T-54：每个主窗口都会调一次，内部只挂一次
+        _log(f"createActions 完成 shortcut={action.shortcut()!r}")
 
     # ---- 应用级快捷键：无论焦点在主窗口、画布还是弹窗，Shift+B 都切换弹窗 ----
     def _install_app_shortcut_filter(self):
         if getattr(self, "_app_filter_installed", False):
             return
-        try:
+        with suppress(AttributeError, RuntimeError):
             from PyQt6.QtWidgets import QApplication
+
             app = QApplication.instance()
             if app is None:
                 return
             app.installEventFilter(self)
             self._app_filter_installed = True
-        except Exception:
-            pass
 
     def _shortcut_sequence(self):
         from PyQt6.QtGui import QKeySequence
+
         action = Krita.instance().action(ACTION_POPUP_ID)
-        return action.shortcut() if action is not None else QKeySequence(DEFAULT_POPUP_SHORTCUT)
+        return (
+            action.shortcut()
+            if action is not None
+            else QKeySequence(DEFAULT_POPUP_SHORTCUT)
+        )
 
     def eventFilter(self, obj, event):
         """接管 Shift+B：弹窗可见→关闭，不可见→弹出。
@@ -2971,12 +3420,16 @@ class HsvPickerExtension(Extension):
             from PyQt6.QtCore import QEvent
             from PyQt6.QtGui import QKeySequence
             from PyQt6.QtWidgets import QAbstractSpinBox, QApplication, QLineEdit
+
             et = event.type()
             if et == QEvent.Type.KeyPress:
                 if event.isAutoRepeat():
                     return False
                 combo = QKeySequence(event.keyCombination())
-                if self._shortcut_sequence().matches(combo) != QKeySequence.SequenceMatch.ExactMatch:
+                if (
+                    self._shortcut_sequence().matches(combo)
+                    != QKeySequence.SequenceMatch.ExactMatch
+                ):
                     return False
             elif et == QEvent.Type.Shortcut:
                 if event.key() != self._shortcut_sequence():
@@ -2984,52 +3437,56 @@ class HsvPickerExtension(Extension):
             else:
                 return False
             focused = QApplication.focusWidget()
-            text_input = focused if isinstance(focused, (QLineEdit, QAbstractSpinBox)) else None
+            text_input = (
+                focused if isinstance(focused, (QLineEdit, QAbstractSpinBox)) else None
+            )
             if text_input is None and isinstance(obj, (QLineEdit, QAbstractSpinBox)):
-                text_input = obj      # 焦点信息缺失时以事件目标兜底（直接派发也按文本输入处理）
+                text_input = (
+                    obj  # 焦点信息缺失时以事件目标兜底（直接派发也按文本输入处理）
+                )
             if text_input is not None:
                 if dlog.is_enabled():
-                    dlog.log_throttled("HOTKEY_SKIP", 200, reason="text",
-                                       cls=type(text_input).__name__)
+                    dlog.log_throttled(
+                        "HOTKEY_SKIP", 200, reason="text", cls=type(text_input).__name__
+                    )
                 return False
             if dlog.is_enabled():
-                dlog.log("HOTKEY", visible=int(bool(self._popup and self._popup.isVisible())))
+                dlog.log(
+                    "HOTKEY", visible=int(bool(self._popup and self._popup.isVisible()))
+                )
             self.toggle_popup()
             return True
-        except Exception:
+        except (AttributeError, RuntimeError, TypeError):
             return False
-
 
     # ---- T-54：应用退出 / 最后一个主窗口关闭 => 收掉弹窗 ----
     def _install_quit_hooks(self):
         """只挂一次：Krita applicationClosing + Qt aboutToQuit + 应用级 Close 过滤器。"""
         if getattr(self, "_quit_hook_installed", False):
             return
-        self._quit_hook_installed = True      # 先置标志：createActions 每个主窗口都会调用
+        self._quit_hook_installed = True  # 先置标志：createActions 每个主窗口都会调用
         self._quit_notifier = None
         self._quit_app = None
         self._quit_filter = None
-        try:
+        with suppress(AttributeError, RuntimeError, TypeError):
             notifier = Krita.instance().notifier()
             notifier.applicationClosing.connect(self._close_popup_for_quit)
-            self._quit_notifier = notifier     # 持引用，防止被 GC 后信号失联
-        except Exception:
-            pass
-        try:
+            self._quit_notifier = notifier  # 持引用，防止被 GC 后信号失联
+        with suppress(AttributeError, RuntimeError):
             from PyQt6.QtWidgets import QApplication
+
             app = QApplication.instance()
             if app is not None:
                 app.aboutToQuit.connect(self._close_popup_for_quit)
                 self._quit_app = app
-        except Exception:
-            pass
         try:
             from PyQt6.QtWidgets import QApplication
+
             app = QApplication.instance()
             if app is not None:
                 self._quit_filter = _QuitCloseFilter(self)
                 app.installEventFilter(self._quit_filter)
-        except Exception:
+        except (AttributeError, RuntimeError):
             self._quit_filter = None
 
     def _remove_quit_hooks(self):
@@ -3037,60 +3494,51 @@ class HsvPickerExtension(Extension):
         self._quit_hook_installed = False
         notifier = getattr(self, "_quit_notifier", None)
         if notifier is not None:
-            try:
+            with suppress(RuntimeError, TypeError):
                 notifier.applicationClosing.disconnect(self._close_popup_for_quit)
-            except Exception:
-                pass
         self._quit_notifier = None
         app = getattr(self, "_quit_app", None)
         if app is not None:
-            try:
+            with suppress(RuntimeError, TypeError):
                 app.aboutToQuit.disconnect(self._close_popup_for_quit)
-            except Exception:
-                pass
         self._quit_app = None
         flt = getattr(self, "_quit_filter", None)
         if flt is not None:
-            try:
+            with suppress(RuntimeError):
                 from PyQt6.QtWidgets import QApplication
+
                 app = QApplication.instance()
                 if app is not None:
                     app.removeEventFilter(flt)
-            except Exception:
-                pass
         self._quit_filter = None
 
     def _is_last_visible_main_window(self, window):
         """除 window 外没有其它可见 QMainWindow => 它是最后一个主窗口。"""
         try:
             from PyQt6.QtWidgets import QApplication, QMainWindow
+
             for w in QApplication.topLevelWidgets():
                 if w is window:
                     continue
                 if isinstance(w, QMainWindow) and w.isVisible():
                     return False
             return True
-        except Exception:
-            return False        # 判定失败时保守：不误收弹窗
+        except (AttributeError, RuntimeError):
+            return False  # 判定失败时保守：不误收弹窗
 
     def _close_popup_for_quit(self, *args):
-        """幂等收掉弹窗：hide + deleteLater + 清引用；退出路径上异常一律吞掉。"""
+        """幂等收掉弹窗：hide + deleteLater + 清引用；容忍已销毁的 Qt 对象。"""
         try:
             popup = getattr(self, "_popup", None)
             self._popup = None
-        except Exception:
+        except AttributeError:
             return
         if popup is None:
             return
-        try:
+        with suppress(RuntimeError):
             popup.hide()
-        except Exception:
-            pass
-        try:
+        with suppress(RuntimeError):
             popup.deleteLater()
-        except Exception:
-            pass
-
 
     def attach_docker(self, docker):
         """Docker 创建后登记，供弹出窗口共享颜色/历史状态。"""
@@ -3098,16 +3546,14 @@ class HsvPickerExtension(Extension):
 
     def toggle_popup(self, *args):
         """快捷键触发：显示/隐藏临时弹出的拾色器窗口（不消抖，每次按键都切换）。"""
-        self._install_app_shortcut_filter()      # 兜底：确保应用级快捷键接管已安装
+        self._install_app_shortcut_filter()  # 兜底：确保应用级快捷键接管已安装
         try:
             if not _alive(self._popup):
                 partner = getattr(self, "_docker", None)
                 self._popup = HsvPickerPopup(partner.panel if _alive(partner) else None)
             self._popup.toggle()
-        except Exception:
-            _log("toggle_popup 失败:\n%s" % traceback.format_exc())
-
-
+        except (AttributeError, RuntimeError):
+            _log(f"toggle_popup 失败:\n{traceback.format_exc()}")
 
 
 class HsvPickerPopup(QWidget):
@@ -3116,8 +3562,12 @@ class HsvPickerPopup(QWidget):
     def __init__(self, partner=None):
         window = Krita.instance().activeWindow()
         host = window.qwindow() if window is not None else None
-        embedded = QGuiApplication.platformName().startswith("wayland") and host is not None
-        super().__init__(host, Qt.WindowType.SubWindow if embedded else Qt.WindowType.Tool)
+        embedded = (
+            QGuiApplication.platformName().startswith("wayland") and host is not None
+        )
+        super().__init__(
+            host, Qt.WindowType.SubWindow if embedded else Qt.WindowType.Tool
+        )
         # Wayland cannot position ordinary top-level windows. Keep the picker
         # in Krita's surface, sharing its coordinate space and focus.
         self._embedded = embedded
@@ -3126,13 +3576,15 @@ class HsvPickerPopup(QWidget):
         self.setWindowTitle(i18n.t("馍馍拾色器", "Momo Color Picker"))
         self._partner = partner
         self._changing_flags = False
-        self._programmatic_resize = False      # 程序化 resize（构造/默认应用）期间不写尺寸记忆
-        self._programmatic_size = (0, 0)       # 最近一次程序化 resize 的目标尺寸
-        self._size_user_resizable = False      # 首次 show 之前不接受「用户 resize」落盘
+        self._programmatic_resize = (
+            False  # 程序化 resize（构造/默认应用）期间不写尺寸记忆
+        )
+        self._programmatic_size = (0, 0)  # 最近一次程序化 resize 的目标尺寸
+        self._size_user_resizable = False  # 首次 show 之前不接受「用户 resize」落盘
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.panel = HsvPickerPanel(self, dbg_name="popup", follow_active_view=True)
-        self.panel.dialog_host = self        # R18：从弹窗打开「按键功能」时以弹窗为 parent
+        self.panel.dialog_host = self  # R18：从弹窗打开「按键功能」时以弹窗为 parent
         layout.addWidget(self.panel)
         self._size_grip = QSizeGrip(self)
         self._size_grip.setVisible(self._embedded)
@@ -3153,10 +3605,16 @@ class HsvPickerPopup(QWidget):
             partner.history_listeners.append(self.panel.set_history)
             self.panel.set_history(partner.history.colors, save=False)
             # 显示开关双向同步（各改各的对端，避免自我回环）
-            self.panel.view_listeners.append(lambda which, value: partner.set_view_flag(which, value))
-            partner.view_listeners.append(lambda which, value: self.panel.set_view_flag(which, value))
+            self.panel.view_listeners.append(
+                lambda which, value: partner.set_view_flag(which, value)
+            )
+            partner.view_listeners.append(
+                lambda which, value: self.panel.set_view_flag(which, value)
+            )
             # 视图绑定也共享：两边读写同一份 Krita 前景色
-            self.panel.set_view(partner._view if partner._view is not None else active_view())
+            self.panel.set_view(
+                partner._view if partner._view is not None else active_view()
+            )
             self.panel.set_show_clusters(partner.show_clusters, _broadcast=False)
             self.panel.set_show_lines(partner.show_lines, _broadcast=False)
             # 浮层选项也照抄一份（两边各自读设置，这里保证构造时一致）
@@ -3178,7 +3636,7 @@ class HsvPickerPopup(QWidget):
         """Wayland 使用宿主内浮窗；其它后端使用关联宿主的工具窗。"""
         if self._embedded:
             return
-        try:
+        with suppress(AttributeError, RuntimeError):
             flags = self.windowFlags()
             top = Qt.WindowType.WindowStaysOnTopHint
             wanted = (flags | top) if self.panel.effective_top() else (flags & ~top)
@@ -3190,27 +3648,24 @@ class HsvPickerPopup(QWidget):
             if was_visible:
                 self.show()
                 self.raise_()
-        except Exception:
-            pass
-        finally:
-            self._changing_flags = False
 
     def _screen_available_size(self):
         """当前屏幕可用区（光标所在屏优先，取不到用主屏）；无屏幕信息返回 None。"""
         if self._embedded:
             size = self.parentWidget().size()
             return size.width(), size.height()
-        try:
+        with suppress(AttributeError, RuntimeError):
             from PyQt6.QtGui import QCursor, QGuiApplication
             from PyQt6.QtWidgets import QApplication
-            screen = QGuiApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+
+            screen = (
+                QGuiApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+            )
             if screen is None:
                 return None
             geo = screen.availableGeometry()
             if geo.width() > 0 and geo.height() > 0:
                 return (geo.width(), geo.height())
-        except Exception:
-            pass
         return None
 
     def _clamp_size_to_screen(self, w, h):
@@ -3228,12 +3683,18 @@ class HsvPickerPopup(QWidget):
         """
         hint = self.panel.sizeHint()
         min_hint = self.panel.minimumSizeHint()
-        w = max(int(hint.width()), int(min_hint.width()), int(self.panel.minimumWidth()))
-        h = max(int(hint.height()), int(min_hint.height()), int(self.panel.minimumHeight()))
+        w = max(
+            int(hint.width()), int(min_hint.width()), int(self.panel.minimumWidth())
+        )
+        h = max(
+            int(hint.height()), int(min_hint.height()), int(self.panel.minimumHeight())
+        )
         if w <= 0 or h <= 0:
-            w, h = 300, 430      # 极端兜底：面板 hint 完全无效时给一个可用尺寸
+            w, h = 300, 430  # 极端兜底：面板 hint 完全无效时给一个可用尺寸
         margins = self.panel._content_layout.contentsMargins()
-        picker_width = w - margins.left() - margins.right() - self.panel.history.width() - 6
+        picker_width = (
+            w - margins.left() - margins.right() - self.panel.history.width() - 6
+        )
         controls_height = min_hint.height() - self.panel.mid_box.minimumHeight()
         footer_height = max(0, self.layout().minimumSize().height() - min_hint.height())
         h = max(h, picker_width + controls_height + footer_height)
@@ -3241,23 +3702,25 @@ class HsvPickerPopup(QWidget):
 
     def _read_user_size(self):
         """读用户手动 resize 的记忆（只认新键；旧键 HsvPickerPopupSize 不再生效）。"""
-        try:
+        with suppress(AttributeError, RuntimeError, TypeError, ValueError):
             raw = Krita.instance().readSetting("", POPUP_SIZE_USER_KEY, "") or ""
             if "x" in raw:
                 w, h = (int(x) for x in raw.split("x", 1))
                 if 280 <= w <= 4000 and 280 <= h <= 4000:
                     return w, h
-        except Exception:
-            pass
         return None
 
     def _apply_initial_size(self):
         """构造时应用尺寸：用户记忆优先，否则按内容计算；全程标记为程序化 resize。"""
         try:
             size = self._read_user_size()
-            size = self._clamp_size_to_screen(*size) if size is not None else self._default_size()
-        except Exception:
-            size = (300, 430)      # 兜底：面板 hint 计算异常时也不让构造失败
+            size = (
+                self._clamp_size_to_screen(*size)
+                if size is not None
+                else self._default_size()
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            size = (300, 430)  # 兜底：面板 hint 计算异常时也不让构造失败
         self._programmatic_resize = True
         try:
             self.resize(size[0], size[1])
@@ -3268,19 +3731,18 @@ class HsvPickerPopup(QWidget):
 
     def _save_size(self, size=None):
         """把用户手动调整后的尺寸写入新键（旧键不再写）。"""
-        try:
+        with suppress(RuntimeError, TypeError, ValueError):
             w, h = size if size is not None else (self.width(), self.height())
-            Krita.instance().writeSetting("", POPUP_SIZE_USER_KEY, "%dx%d" % (int(w), int(h)))
-        except Exception:
-            pass
+            Krita.instance().writeSetting("", POPUP_SIZE_USER_KEY, f"{int(w)}x{int(h)}")
 
     def resizeEvent(self, event):
         # 程序化 resize / 首次显示前不写记忆；只有用户手动改变尺寸才落盘。
-        if (not getattr(self, "_programmatic_resize", False)
-                and getattr(self, "_size_user_resizable", False)):
+        if not getattr(self, "_programmatic_resize", False) and getattr(
+            self, "_size_user_resizable", False
+        ):
             size = (event.size().width(), event.size().height())
             if size != getattr(self, "_programmatic_size", None):
-                self._programmatic_size = size      # 之后同尺寸事件（换窗口标志等）不重复写
+                self._programmatic_size = size  # 之后同尺寸事件（换窗口标志等）不重复写
                 self._save_size(size)
         super().resizeEvent(event)
 
@@ -3294,7 +3756,10 @@ class HsvPickerPopup(QWidget):
             host = window.qwindow() if window is not None else None
             if host is not None and self.parentWidget() is not host:
                 size = self.size()
-                self.setParent(host, Qt.WindowType.SubWindow if self._embedded else Qt.WindowType.Tool)
+                self.setParent(
+                    host,
+                    Qt.WindowType.SubWindow if self._embedded else Qt.WindowType.Tool,
+                )
                 self.resize(size)
             self._return_focus = QApplication.focusWidget()
             self._apply_window_flags()
@@ -3309,22 +3774,28 @@ class HsvPickerPopup(QWidget):
 
     def _place_popup(self):
         """按「弹出位置跟随鼠标」放置：以鼠标为中心；超出 Krita 主窗口时贴边夹回窗口内。"""
-        try:
+        with suppress(AttributeError, RuntimeError, TypeError, ValueError):
             from PyQt6.QtGui import QCursor, QGuiApplication
             from PyQt6.QtWidgets import QApplication
+
             cursor = QCursor.pos()
             if self._embedded:
                 host = self.parentWidget()
                 self._programmatic_resize = True
                 try:
                     self.setMaximumSize(host.size())
-                    self.resize(*self._clamp_size_to_screen(self.width(), self.height()))
+                    self.resize(
+                        *self._clamp_size_to_screen(self.width(), self.height())
+                    )
                 finally:
                     self._programmatic_resize = False
                 cursor = host.mapFromGlobal(cursor)
                 rect = host.rect()
-                x, y = popup_position((cursor.x(), cursor.y()), (self.width(), self.height()),
-                                      (rect.left(), rect.top(), rect.right(), rect.bottom()))
+                x, y = popup_position(
+                    (cursor.x(), cursor.y()),
+                    (self.width(), self.height()),
+                    (rect.left(), rect.top(), rect.right(), rect.bottom()),
+                )
                 self.move(x, y)
                 return
             screen = QGuiApplication.screenAt(cursor) or QApplication.primaryScreen()
@@ -3340,13 +3811,15 @@ class HsvPickerPopup(QWidget):
                     fg = qw.frameGeometry()
                     if fg.width() > 0 and fg.height() > 0:
                         window_rect = (fg.left(), fg.top(), fg.right(), fg.bottom())
-            except Exception:
+            except (AttributeError, RuntimeError):
                 window_rect = None
-            x, y = popup_position((cursor.x(), cursor.y()), (self.width(), self.height()),
-                                  screen_rect, window_rect)
+            x, y = popup_position(
+                (cursor.x(), cursor.y()),
+                (self.width(), self.height()),
+                screen_rect,
+                window_rect,
+            )
             self.move(x, y)
-        except Exception:
-            pass
 
     def _auto_close_enabled(self):
         """主面板与弹窗任一取消勾选，都视为关闭「外点自动关闭」。"""
@@ -3359,48 +3832,44 @@ class HsvPickerPopup(QWidget):
     def _install_outside_filter(self):
         if getattr(self, "_outside_filter", False):
             return
-        try:
+        with suppress(AttributeError, RuntimeError):
             from PyQt6.QtWidgets import QApplication
+
             QApplication.instance().installEventFilter(self)
             self._outside_filter = True
-        except Exception:
-            pass
 
     def _remove_outside_filter(self):
         if not getattr(self, "_outside_filter", False):
             return
-        try:
+        with suppress(AttributeError, RuntimeError):
             from PyQt6.QtWidgets import QApplication
+
             QApplication.instance().removeEventFilter(self)
-        except Exception:
-            pass
         self._outside_filter = False
 
     def _obj_is_ours(self, obj):
         """obj 是否为本弹窗或其子控件（QMenu 等顶层子窗口按 parentWidget 链判断）。"""
-        try:
+        with suppress(AttributeError, RuntimeError):
             w = obj
             while w is not None:
                 if w is self:
                     return True
                 w = w.parentWidget()
-        except Exception:
-            pass
         return False
 
     def _is_inside_popup(self, gpos):
         """gpos 命中的控件是否属于本弹窗（含「设置」菜单等子窗口）。"""
-        try:
+        with suppress(AttributeError, RuntimeError):
             from PyQt6.QtWidgets import QApplication
+
             return self._obj_is_ours(QApplication.widgetAt(gpos))
-        except Exception:
-            pass
         return False
 
     def eventFilter(self, obj, event):
         """点窗口外：按设置决定是否隐藏；隐藏时**吃掉这次点击**（画布不受影响）。"""
-        try:
+        with suppress(AttributeError, RuntimeError, TypeError):
             from PyQt6.QtCore import QEvent
+
             if self.isVisible() and self._embedded and obj is self.parentWidget():
                 if event.type() in (QEvent.Type.Hide, QEvent.Type.Close):
                     self.hide()
@@ -3409,86 +3878,97 @@ class HsvPickerPopup(QWidget):
                     self._programmatic_resize = True
                     try:
                         self.setMaximumSize(host.size())
-                        self.move(max(0, min(self.x(), host.width() - self.width())),
-                                  max(0, min(self.y(), host.height() - self.height())))
+                        self.move(
+                            max(0, min(self.x(), host.width() - self.width())),
+                            max(0, min(self.y(), host.height() - self.height())),
+                        )
                     finally:
                         self._programmatic_resize = False
-            if (self._embedded and event.type() == QEvent.Type.ApplicationDeactivate
-                    and self.isVisible() and self._auto_close_enabled()):
+            if (
+                self._embedded
+                and event.type() == QEvent.Type.ApplicationDeactivate
+                and self.isVisible()
+                and self._auto_close_enabled()
+            ):
                 self.hide()
             if event.type() == QEvent.Type.MouseButtonPress and self.isVisible():
                 # 事件目标是本弹窗或其后代（含设置菜单）：算作内部点击
                 if obj is self or self._obj_is_ours(obj):
                     return super().eventFilter(obj, event)
                 gpos = event.globalPosition().toPoint()
-                if not self.rect().contains(self.mapFromGlobal(gpos)) \
-                        and not self._is_inside_popup(gpos):
+                if not self.rect().contains(
+                    self.mapFromGlobal(gpos)
+                ) and not self._is_inside_popup(gpos):
                     if not self._auto_close_enabled():
-                        return super().eventFilter(obj, event)    # 设置项关闭：不隐藏、不消费
+                        return super().eventFilter(
+                            obj, event
+                        )  # 设置项关闭：不隐藏、不消费
                     self._hide_reason = "auto_close"
                     self.hide()
-                    return True          # 消费掉，避免画布同时收到这一下
-        except Exception:
-            pass
+                    return True  # 消费掉，避免画布同时收到这一下
         return super().eventFilter(obj, event)
 
     def showEvent(self, event):
         if not getattr(self, "_changing_flags", False) and dlog.is_enabled():
-            dlog.log("POPUP_SHOW", auto_close=int(self._auto_close_enabled()),
-                     on_top=int(bool(getattr(self.panel, "always_on_top", True))))
+            dlog.log(
+                "POPUP_SHOW",
+                auto_close=int(self._auto_close_enabled()),
+                on_top=int(bool(getattr(self.panel, "always_on_top", True))),
+            )
         super().showEvent(event)
-        self._size_user_resizable = True      # 首次显示完成，之后才接受「用户 resize」落盘
-        try:
-            self.panel._sync_keymap_dialog_visibility()      # 最小化恢复后重新显示对话框
-        except Exception:
-            pass
+        self._size_user_resizable = True  # 首次显示完成，之后才接受「用户 resize」落盘
+        with suppress(RuntimeError):
+            self.panel._sync_keymap_dialog_visibility()  # 最小化恢复后重新显示对话框
 
     # R24：弹出面板最小化/恢复 -> 「按键功能」对话框隐藏/重新显示
     def changeEvent(self, event):
         super().changeEvent(event)
         if getattr(self, "_changing_flags", False):
             return
-        try:
+        with suppress(RuntimeError):
             if event.type() == QEvent.Type.WindowStateChange:
                 self.panel._sync_keymap_dialog_visibility()
-        except Exception:
-            pass
 
     def hideEvent(self, event):
         if getattr(self, "_changing_flags", False):
             super().hideEvent(event)
             return
-        try:
+        with suppress(RuntimeError, AttributeError):
             self._remove_outside_filter()
             if dlog.is_enabled():
-                dlog.log("POPUP_HIDE", reason=getattr(self, "_hide_reason", "-"),
-                         auto_close=int(self._auto_close_enabled()))
+                dlog.log(
+                    "POPUP_HIDE",
+                    reason=getattr(self, "_hide_reason", "-"),
+                    auto_close=int(self._auto_close_enabled()),
+                )
             self._hide_reason = "-"
-            if _alive(self._partner) and _alive(self.panel) and _alive(self.panel.picker):
+            if (
+                _alive(self._partner)
+                and _alive(self.panel)
+                and _alive(self.panel.picker)
+            ):
                 self._partner.apply_external(
-                    self.panel.h, self.panel.s, self.panel.v,
-                    "#%02X%02X%02X" % self.panel.picker_rgb())
-        except (RuntimeError, AttributeError):
-            pass
+                    self.panel.h,
+                    self.panel.s,
+                    self.panel.v,
+                    "#{:02X}{:02X}{:02X}".format(*self.panel.picker_rgb()),
+                )
         super().hideEvent(event)
         previous = getattr(self, "_return_focus", None)
         if _alive(previous) and previous.isVisible():
             previous.setFocus(Qt.FocusReason.OtherFocusReason)
-        try:
-            self.panel._sync_keymap_dialog_visibility()      # R24：宿主隐藏 -> 关闭对话框
-        except Exception:
-            pass
+        with suppress(RuntimeError):
+            self.panel._sync_keymap_dialog_visibility()  # R24：宿主隐藏 -> 关闭对话框
 
 
 # ---- 注册（必须在模块 import 时执行，__init__.py 会 import 本模块）----
 _EXTENSION = HsvPickerExtension(Krita.instance())
 Krita.instance().addDockWidgetFactory(
-    DockWidgetFactory(PLUGIN_ID,
-                      DockWidgetFactoryBase.DockPosition.DockRight,
-                      HsvPickerDocker))
+    DockWidgetFactory(
+        PLUGIN_ID, DockWidgetFactoryBase.DockPosition.DockRight, HsvPickerDocker
+    )
+)
 Krita.instance().addExtension(_EXTENSION)
-try:
+with suppress(RuntimeError):
     _EXTENSION._install_app_shortcut_filter()
-except Exception:
-    pass
 _log("模块注册完成")

@@ -1,8 +1,9 @@
 """Qt6 interaction/buffer regressions; run with Python + PyQt6 + NumPy."""
+
 import gc
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import QEvent, QPointF, Qt
@@ -22,21 +23,29 @@ class Qt6BehaviorTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_rgb_image_owns_unaligned_noncontiguous_rows(self):
-        source = np.array([
-            [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
-            [[10, 11, 12], [13, 14, 15], [16, 17, 18]],
-        ], dtype=np.uint8)
+        source = np.array(
+            [
+                [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+                [[10, 11, 12], [13, 14, 15], [16, 17, 18]],
+            ],
+            dtype=np.uint8,
+        )
         # Reversing the columns requires a contiguous copy; 9-byte rows also
         # exercise QImage's explicit bytesPerLine rather than aligned defaults.
         image = qimage_from_rgb(source[:, ::-1])
         source[:] = 0
         del source
         gc.collect()
-        actual = [[image.pixelColor(x, y).getRgb()[:3] for x in range(3)] for y in range(2)]
-        self.assertEqual(actual, [
-            [(7, 8, 9), (4, 5, 6), (1, 2, 3)],
-            [(16, 17, 18), (13, 14, 15), (10, 11, 12)],
-        ])
+        actual = [
+            [image.pixelColor(x, y).getRgb()[:3] for x in range(3)] for y in range(2)
+        ]
+        self.assertEqual(
+            actual,
+            [
+                [(7, 8, 9), (4, 5, 6), (1, 2, 3)],
+                [(16, 17, 18), (13, 14, 15), (10, 11, 12)],
+            ],
+        )
 
     def test_rgba_image_preserves_channels_and_alpha_after_source_mutation(self):
         source = np.array([[[11, 37, 83, 129], [201, 149, 97, 45]]], dtype=np.uint8)
@@ -51,13 +60,21 @@ class Qt6BehaviorTests(unittest.TestCase):
         self.addCleanup(widget.close)
         widget.resize(16, 3 * CELL)
         widget.set_colors(["#112233", "#445566"])
-        for y, button in ((CELL - 0.25, Qt.MouseButton.LeftButton),
-                          (CELL, Qt.MouseButton.LeftButton),
-                          (2 * CELL, Qt.MouseButton.LeftButton),
-                          (0.5, Qt.MouseButton.RightButton)):
+        for y, button in (
+            (CELL - 0.25, Qt.MouseButton.LeftButton),
+            (CELL, Qt.MouseButton.LeftButton),
+            (2 * CELL, Qt.MouseButton.LeftButton),
+            (0.5, Qt.MouseButton.RightButton),
+        ):
             point = QPointF(5.5, y)
-            event = QMouseEvent(QEvent.Type.MouseButtonPress, point, point,
-                                button, button, Qt.KeyboardModifier.NoModifier)
+            event = QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                point,
+                point,
+                button,
+                button,
+                Qt.KeyboardModifier.NoModifier,
+            )
             QApplication.sendEvent(widget, event)
         self.assertEqual(selected, ["#112233", "#445566"])
 

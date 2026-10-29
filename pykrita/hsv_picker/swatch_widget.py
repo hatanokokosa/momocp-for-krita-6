@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """色块控件。
 
 - ``CurrentColorSwatch``：颜色行中可伸展的当前色块，高度与 HEX 输入框一致；
@@ -7,17 +6,19 @@
 色块颜色均为实时值（不是点击前快照）。
 """
 
+from contextlib import suppress
+
 from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QPainter
 from PyQt6.QtWidgets import QApplication, QSizePolicy, QWidget
 
-try:                        # 插件内：包内相对导入
+try:  # 插件内：包内相对导入
     from . import i18n
-except ImportError:         # 离线单测：直接把本目录加进 sys.path
+except ImportError:  # 离线单测：直接把本目录加进 sys.path
     import i18n
 
-TOP_H = 24.0        # 当前拾色器色块高度
-BOTTOM_H = 24.0     # 前景/背景色块高度
+TOP_H = 24.0  # 当前拾色器色块高度
+BOTTOM_H = 24.0  # 前景/背景色块高度
 
 
 class ColorSwatchWidget(QWidget):
@@ -25,11 +26,14 @@ class ColorSwatchWidget(QWidget):
         super().__init__(parent)
         self.setFixedHeight(int(TOP_H + BOTTOM_H))
         self.picker_color = QColor(255, 0, 0)
-        self.fg_color = None      # None = 无活动文档
+        self.fg_color = None  # None = 无活动文档
         self.bg_color = None
-        self.setToolTip(i18n.t(
-            "上：当前拾色器颜色　左下：Krita 前景色　右下：Krita 背景色",
-            "Top: current picker color  ·  Bottom-left: Krita foreground  ·  Bottom-right: Krita background"))
+        self.setToolTip(
+            i18n.t(
+                "上：当前拾色器颜色　左下：Krita 前景色　右下：Krita 背景色",
+                "Top: current picker color  ·  Bottom-left: Krita foreground  ·  Bottom-right: Krita background",
+            )
+        )
 
     def set_picker_color(self, qcolor):
         self.picker_color = QColor(qcolor)
@@ -63,19 +67,23 @@ class ColorSwatchWidget(QWidget):
                 p.fillRect(rect, QColor(64, 64, 68))
                 continue
             p.fillRect(rect, color)
-            fg = QColor(0, 0, 0, 210) if color.lightness() > 128 else QColor(255, 255, 255, 215)
+            fg = (
+                QColor(0, 0, 0, 210)
+                if color.lightness() > 128
+                else QColor(255, 255, 255, 215)
+            )
             p.setPen(fg)
-            p.drawText(rect.adjusted(4.0, 0.0, -3.0, -1.0),
-                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, color.name().upper())
-
+            p.drawText(
+                rect.adjusted(4.0, 0.0, -3.0, -1.0),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                color.name().upper(),
+            )
 
     def _copy(self, color):
         if color is None:
             return
-        try:
+        with suppress(RuntimeError, AttributeError):
             QApplication.clipboard().setText(color.name().upper())
-        except Exception:
-            pass
 
     def mousePressEvent(self, event):
         """点色块 = 复制其 HEX。"""
@@ -90,8 +98,8 @@ class ColorSwatchWidget(QWidget):
         event.ignore()
 
 
-CUR_MIN_W = 24      # 控件默认最小宽度；面板按颜色行的可用空间伸展
-CUR_H = 24          # 当前色小色块初始高度（面板随后按 HEX 框高度校正）
+CUR_MIN_W = 24  # 控件默认最小宽度；面板按颜色行的可用空间伸展
+CUR_H = 24  # 当前色小色块初始高度（面板随后按 HEX 框高度校正）
 
 
 class CurrentColorSwatch(QWidget):
@@ -128,16 +136,18 @@ class CurrentColorSwatch(QWidget):
             self.setFixedHeight(height)
 
     def _sync_tip(self):
-        self.setToolTip(i18n.t("当前选色 %s（点击复制 HEX）",
-                               "Current color %s (click to copy HEX)") % self.hex_text())
+        self.setToolTip(
+            i18n.t(
+                "当前选色 %s（点击复制 HEX）", "Current color %s (click to copy HEX)"
+            )
+            % self.hex_text()
+        )
 
     def _border_color(self):
-        try:
+        with suppress(RuntimeError, AttributeError):
             color = QApplication.palette().mid().color()
             if color.isValid():
                 return color
-        except Exception:
-            pass
         return QColor(115, 115, 120)
 
     def paintEvent(self, event):
@@ -154,8 +164,6 @@ class CurrentColorSwatch(QWidget):
         if event.button() != Qt.MouseButton.LeftButton or self.color is None:
             event.ignore()
             return
-        try:
+        with suppress(RuntimeError, AttributeError):
             QApplication.clipboard().setText(self.color.name().upper())
-        except Exception:
-            pass
         event.accept()

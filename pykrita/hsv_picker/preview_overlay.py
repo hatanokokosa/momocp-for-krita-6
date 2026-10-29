@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """预览浮层：100×150 的独立小窗，显示三个**纯色方块**（没有任何文字）。
 
 对齐 Krita 自带拾色器右上角那份预览：
@@ -22,22 +21,24 @@
   · hide_after(ms)：单次倒计时（可重置），到点**直接隐藏**（不做淡出动画）；拖动期间应调用 cancel_hide()。
 """
 
+from contextlib import suppress
+
 from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QGuiApplication, QPainter
 from PyQt6.QtWidgets import QApplication, QWidget
 
-try:                        # 插件内：包内相对导入
+try:  # 插件内：包内相对导入
     from . import i18n
-except ImportError:         # 离线单测：直接把本目录加进 sys.path
+except ImportError:  # 离线单测：直接把本目录加进 sys.path
     import i18n
 
-W = 100             # 浮层宽
-H = 150             # 浮层总高（对齐 Krita 自带预览的 100×150）
-TOP_H = 100         # 上格：100×100 正方形（当前选色）
-BOT_H = 50          # 下排：两个 50×50 正方形（100 + 50 = 150）
-GAP = 0             # 与锚点的间隙（px）：0 = 紧贴面板边缘（贴右/左/上/下都在面板之外）
+W = 100  # 浮层宽
+H = 150  # 浮层总高（对齐 Krita 自带预览的 100×150）
+TOP_H = 100  # 上格：100×100 正方形（当前选色）
+BOT_H = 50  # 下排：两个 50×50 正方形（100 + 50 = 150）
+GAP = 0  # 与锚点的间隙（px）：0 = 紧贴面板边缘（贴右/左/上/下都在面板之外）
 
-EMPTY = QColor(105, 105, 110)      # 没有数据的那一格：中灰
+EMPTY = QColor(105, 105, 110)  # 没有数据的那一格：中灰
 
 
 def _rgb(value):
@@ -45,8 +46,8 @@ def _rgb(value):
     if value is None:
         return None
     try:
-        r, g, b = (int(round(float(v))) for v in tuple(value)[:3])
-    except Exception:
+        r, g, b = (round(float(v)) for v in tuple(value)[:3])
+    except (TypeError, ValueError, OverflowError):
         return None
     return (max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
 
@@ -55,22 +56,28 @@ class PreviewOverlay(QWidget):
     """三个纯色方块的预览小窗（无文字；常驻对象，反复 show/hide）。"""
 
     def __init__(self, parent=None):
-        self._embedded = QGuiApplication.platformName().startswith("wayland") and parent is not None
-        flags = (Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
-                 | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self._embedded = (
+            QGuiApplication.platformName().startswith("wayland") and parent is not None
+        )
+        flags = (
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
         super().__init__(parent, Qt.WindowType.Widget if self._embedded else flags)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFixedSize(W, H)
         self.setWindowTitle(i18n.t("馍馍拾色器预览", "Momo picker preview"))
-        self.current_rgb = None      # 上格：当前选色
-        self.older_rgb = None        # 右下：上上次选色（历史 colors[1]）
-        self.last_rgb = None         # 左下：上一次选色（历史 colors[0]）
-        self.hide_ms = 2000          # 默认倒计时（松手后计时；面板按模式传 1000/2000/0）
+        self.current_rgb = None  # 上格：当前选色
+        self.older_rgb = None  # 右下：上上次选色（历史 colors[1]）
+        self.last_rgb = None  # 左下：上一次选色（历史 colors[0]）
+        self.hide_ms = 2000  # 默认倒计时（松手后计时；面板按模式传 1000/2000/0）
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self.hide)     # 到点直接隐藏，不做淡出
+        self._timer.timeout.connect(self.hide)  # 到点直接隐藏，不做淡出
 
     # ------------------------------------------------------------ 内容
     def colors(self):
@@ -101,10 +108,8 @@ class PreviewOverlay(QWidget):
         if not self.isVisible():
             self.show()
             return
-        try:
+        with suppress(RuntimeError):
             self.raise_()
-        except Exception:
-            pass
 
     # ------------------------------------------------------------ 倒计时（到点直接隐藏，无淡出）
     def hide_after(self, ms=None):
@@ -165,9 +170,11 @@ class PreviewOverlay(QWidget):
         """三格矩形 + 对应颜色（相邻无间隙：上整行、下排左右各半）。"""
         w = float(self.width())
         half = w / 2.0
-        return [(QRectF(0.0, 0.0, w, TOP_H), self.current_rgb),
-                (QRectF(0.0, TOP_H, half, BOT_H), self.last_rgb),        # 左下 = 上一次
-                (QRectF(half, TOP_H, w - half, BOT_H), self.older_rgb)]  # 右下 = 上上次
+        return [
+            (QRectF(0.0, 0.0, w, TOP_H), self.current_rgb),
+            (QRectF(0.0, TOP_H, half, BOT_H), self.last_rgb),  # 左下 = 上一次
+            (QRectF(half, TOP_H, w - half, BOT_H), self.older_rgb),
+        ]  # 右下 = 上上次
 
     def paintEvent(self, event):
         """只填三个色块：无文字、无边框、无分隔线（三格直接接壤）。"""

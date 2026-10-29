@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """自定义按键表的数据层（纯 Python，不 import krita / Qt）。
 
 数据结构：
@@ -14,8 +13,16 @@ import json
 
 AREA_IDS = ("ring", "square", "lstrip", "cstrip", "astrip", "bstrip", "field")
 BUTTON_IDS = ("left", "middle", "right")
-MOD_IDS = ("none", "shift", "ctrl", "alt",
-           "ctrl_shift", "shift_alt", "ctrl_alt", "ctrl_shift_alt")
+MOD_IDS = (
+    "none",
+    "shift",
+    "ctrl",
+    "alt",
+    "ctrl_shift",
+    "shift_alt",
+    "ctrl_alt",
+    "ctrl_shift_alt",
+)
 
 # (id, 中文, English)
 AREAS = (
@@ -27,47 +34,87 @@ AREAS = (
     ("bstrip", "b 条", "b strip"),
     ("field", "数值框", "Fields"),
 )
-BUTTONS = (("left", "左键", "Left"), ("middle", "中键", "Middle"),
-           ("right", "右键", "Right"))
-MODS = (("none", "无", "None"), ("shift", "Shift", "Shift"), ("ctrl", "Ctrl", "Ctrl"),
-        ("alt", "Alt", "Alt"), ("ctrl_shift", "Ctrl+Shift", "Ctrl+Shift"),
-        ("shift_alt", "Shift+Alt", "Shift+Alt"), ("ctrl_alt", "Ctrl+Alt", "Ctrl+Alt"),
-        ("ctrl_shift_alt", "Ctrl+Shift+Alt", "Ctrl+Shift+Alt"))
+BUTTONS = (
+    ("left", "左键", "Left"),
+    ("middle", "中键", "Middle"),
+    ("right", "右键", "Right"),
+)
+MODS = (
+    ("none", "无", "None"),
+    ("shift", "Shift", "Shift"),
+    ("ctrl", "Ctrl", "Ctrl"),
+    ("alt", "Alt", "Alt"),
+    ("ctrl_shift", "Ctrl+Shift", "Ctrl+Shift"),
+    ("shift_alt", "Shift+Alt", "Shift+Alt"),
+    ("ctrl_alt", "Ctrl+Alt", "Ctrl+Alt"),
+    ("ctrl_shift_alt", "Ctrl+Shift+Alt", "Ctrl+Shift+Alt"),
+)
 
 ACTIONS = {
     "ring": (
         ("none", "无", "None"),
         ("hue_hsv", "转色相（纯 HSV）", "Rotate hue (plain HSV)"),
-        ("hue_lock_lc_cur", "转色相 + 锁明度 + 锁当前彩度口径",
-         "Rotate hue + lock L + lock current chroma scale"),
-        ("hue_lock_lc_other", "转色相 + 锁明度 + 锁另一彩度口径",
-         "Rotate hue + lock L + lock the other chroma scale"),
-        ("hue_lock_lc_abs", "转色相 + 锁明度 + 锁绝对彩度",
-         "Rotate hue + lock L + lock absolute chroma C"),
-        ("hue_lock_lc_rel", "转色相 + 锁明度 + 锁相对彩度",
-         "Rotate hue + lock L + lock relative chroma C_rel"),
+        (
+            "hue_lock_lc_cur",
+            "转色相 + 锁明度 + 锁当前彩度口径",
+            "Rotate hue + lock L + lock current chroma scale",
+        ),
+        (
+            "hue_lock_lc_other",
+            "转色相 + 锁明度 + 锁另一彩度口径",
+            "Rotate hue + lock L + lock the other chroma scale",
+        ),
+        (
+            "hue_lock_lc_abs",
+            "转色相 + 锁明度 + 锁绝对彩度",
+            "Rotate hue + lock L + lock absolute chroma C",
+        ),
+        (
+            "hue_lock_lc_rel",
+            "转色相 + 锁明度 + 锁相对彩度",
+            "Rotate hue + lock L + lock relative chroma C_rel",
+        ),
     ),
     "square": (
         ("none", "无", "None"),
         ("abs", "点哪到哪", "Absolute positioning"),
         ("abs_lock_l", "绝对定位 + 锁明度", "Absolute positioning + lock lightness"),
         ("abs_lock_c", "绝对定位 + 锁彩度", "Absolute positioning + lock chroma"),
-        ("rel_l", "改明度（锁当前彩度口径）",
-         "Change lightness (locks current chroma scale)"),
-        ("rel_l_other", "改明度（锁另一彩度口径）",
-         "Change lightness (locks the other chroma scale)"),
+        (
+            "rel_l",
+            "改明度（锁当前彩度口径）",
+            "Change lightness (locks current chroma scale)",
+        ),
+        (
+            "rel_l_other",
+            "改明度（锁另一彩度口径）",
+            "Change lightness (locks the other chroma scale)",
+        ),
         ("rel_c", "改彩度（锁明度）", "Change chroma (locks lightness)"),
-        ("rel_c_other", "改彩度（锁明度，临时另一口径）",
-         "Change chroma (locks lightness, temporary other scale)"),
+        (
+            "rel_c_other",
+            "改彩度（锁明度，临时另一口径）",
+            "Change chroma (locks lightness, temporary other scale)",
+        ),
         ("s_only", "只改 S", "Saturation only"),
         ("v_only", "只改 V", "Value only"),
     ),
-    "lstrip": (("none", "无", "None"), ("drag_l", "拖动改明度", "Drag to change lightness")),
-    "cstrip": (("none", "无", "None"), ("drag_c", "拖动改彩度", "Drag to change chroma")),
-    "astrip": (("none", "无", "None"),
-               ("drag_self", "拖动只改本分量", "Drag to change only this component")),
-    "bstrip": (("none", "无", "None"),
-               ("drag_self", "拖动只改本分量", "Drag to change only this component")),
+    "lstrip": (
+        ("none", "无", "None"),
+        ("drag_l", "拖动改明度", "Drag to change lightness"),
+    ),
+    "cstrip": (
+        ("none", "无", "None"),
+        ("drag_c", "拖动改彩度", "Drag to change chroma"),
+    ),
+    "astrip": (
+        ("none", "无", "None"),
+        ("drag_self", "拖动只改本分量", "Drag to change only this component"),
+    ),
+    "bstrip": (
+        ("none", "无", "None"),
+        ("drag_self", "拖动只改本分量", "Drag to change only this component"),
+    ),
     "field": (
         ("none", "无", "None"),
         ("text_only", "只编辑文本", "Edit text only"),
@@ -83,21 +130,27 @@ ACTIONS = {
 # 方块内默认：左 = 点哪到哪；中 = 改明度（锁当前口径）；右 = 改彩度（锁明度）。
 # 按住临时切换键再按基础行 = 同一动作锁另一口径（动作解析时翻转，不占默认行）。
 DEFAULTS = {
-    "ring": (("none", "left", "hue_lock_lc_cur"),
-             ("none", "middle", "hue_lock_lc_cur"),
-             ("none", "right", "hue_lock_lc_cur"),
-             ("ctrl", "left", "hue_hsv")),
-    "square": (("none", "left", "abs"),
-               ("none", "middle", "rel_l"),
-               ("none", "right", "rel_c")),
+    "ring": (
+        ("none", "left", "hue_lock_lc_cur"),
+        ("none", "middle", "hue_lock_lc_cur"),
+        ("none", "right", "hue_lock_lc_cur"),
+        ("ctrl", "left", "hue_hsv"),
+    ),
+    "square": (
+        ("none", "left", "abs"),
+        ("none", "middle", "rel_l"),
+        ("none", "right", "rel_c"),
+    ),
     "lstrip": (("none", "left", "drag_l"),),
     "cstrip": (("none", "left", "drag_c"),),
     "astrip": (("none", "left", "drag_self"),),
     "bstrip": (("none", "left", "drag_self"),),
-    "field": (("none", "left", "drag"),
-              ("ctrl", "left", "drag_x2"),
-              ("ctrl_shift", "left", "drag_x4"),
-              ("alt", "left", "drag_x0_5")),
+    "field": (
+        ("none", "left", "drag"),
+        ("ctrl", "left", "drag_x2"),
+        ("ctrl_shift", "left", "drag_x4"),
+        ("alt", "left", "drag_x0_5"),
+    ),
 }
 
 # T-53 旧默认表迁移：区域的**整组行集合**与某个旧默认集合完全相等才替换为新默认；
@@ -105,35 +158,60 @@ DEFAULTS = {
 _OLD_DEFAULT_SETS = {
     "ring": (
         # v7：左/中/右 = rel / abs / abs，Shift+左 = 纯 HSV
-        frozenset({("none", "left", "hue_lock_lc_rel"),
-                   ("none", "middle", "hue_lock_lc_abs"),
-                   ("none", "right", "hue_lock_lc_abs"),
-                   ("shift", "left", "hue_hsv")}),
+        frozenset(
+            {
+                ("none", "left", "hue_lock_lc_rel"),
+                ("none", "middle", "hue_lock_lc_abs"),
+                ("none", "right", "hue_lock_lc_abs"),
+                ("shift", "left", "hue_hsv"),
+            }
+        ),
         # T-51/T-52 旧默认：左/中/右 = cur，Shift 三键 = other，Ctrl+左 = 纯 HSV
-        frozenset({("none", "left", "hue_lock_lc_cur"),
-                   ("none", "middle", "hue_lock_lc_cur"),
-                   ("none", "right", "hue_lock_lc_cur"),
-                   ("shift", "left", "hue_lock_lc_other"),
-                   ("shift", "middle", "hue_lock_lc_other"),
-                   ("shift", "right", "hue_lock_lc_other"),
-                   ("ctrl", "left", "hue_hsv")}),
+        frozenset(
+            {
+                ("none", "left", "hue_lock_lc_cur"),
+                ("none", "middle", "hue_lock_lc_cur"),
+                ("none", "right", "hue_lock_lc_cur"),
+                ("shift", "left", "hue_lock_lc_other"),
+                ("shift", "middle", "hue_lock_lc_other"),
+                ("shift", "right", "hue_lock_lc_other"),
+                ("ctrl", "left", "hue_hsv"),
+            }
+        ),
     ),
     "square": (
         # v7：左/中/右 = abs / rel_l / rel_c，Shift+左 = s_only，Alt+左 = v_only
-        frozenset({("none", "left", "abs"), ("none", "middle", "rel_l"),
-                   ("none", "right", "rel_c"), ("shift", "left", "s_only"),
-                   ("alt", "left", "v_only")}),
+        frozenset(
+            {
+                ("none", "left", "abs"),
+                ("none", "middle", "rel_l"),
+                ("none", "right", "rel_c"),
+                ("shift", "left", "s_only"),
+                ("alt", "left", "v_only"),
+            }
+        ),
         # T-48：v7 + Shift+中/右 = abs_lock_c / abs_lock_l
-        frozenset({("none", "left", "abs"), ("none", "middle", "rel_l"),
-                   ("none", "right", "rel_c"), ("shift", "left", "s_only"),
-                   ("alt", "left", "v_only"),
-                   ("shift", "middle", "abs_lock_c"),
-                   ("shift", "right", "abs_lock_l")}),
+        frozenset(
+            {
+                ("none", "left", "abs"),
+                ("none", "middle", "rel_l"),
+                ("none", "right", "rel_c"),
+                ("shift", "left", "s_only"),
+                ("alt", "left", "v_only"),
+                ("shift", "middle", "abs_lock_c"),
+                ("shift", "right", "abs_lock_l"),
+            }
+        ),
         # T-51/T-52 旧默认：左/中/右 = abs / rel_l / rel_c，Shift+中/右 = rel_l_other / rel_c_other
-        frozenset({("none", "left", "abs"), ("none", "middle", "rel_l"),
-                   ("none", "right", "rel_c"),
-                   ("shift", "middle", "rel_l_other"),
-                   ("shift", "right", "rel_c_other")}),
+        frozenset(
+            {
+                ("none", "left", "abs"),
+                ("none", "middle", "rel_l"),
+                ("none", "right", "rel_c"),
+                ("shift", "middle", "rel_l_other"),
+                ("shift", "right", "rel_c_other"),
+            }
+        ),
     ),
 }
 
@@ -173,11 +251,11 @@ def input_label(mods, btn, zh=True):
     b = button_label(btn, zh)
     if mods in (None, "none"):
         return b
-    return "%s + %s" % (mod_label(mods, zh), b)
+    return f"{mod_label(mods, zh)} + {b}"
 
 
 def default_keymap():
-    return dict((a, list(DEFAULTS[a])) for a in AREA_IDS)
+    return {a: list(DEFAULTS[a]) for a in AREA_IDS}
 
 
 def mods_from_bools(shift, ctrl, alt, other=False):
@@ -204,9 +282,16 @@ def mods_from_bools(shift, ctrl, alt, other=False):
 
 def mod_bits(mods):
     """MOD_ID -> (shift, ctrl, alt) 三个布尔位；未知 ID 返回全 False。"""
-    bits = {"none": (0, 0, 0), "shift": (1, 0, 0), "ctrl": (0, 1, 0),
-            "alt": (0, 0, 1), "ctrl_shift": (1, 1, 0), "shift_alt": (1, 0, 1),
-            "ctrl_alt": (0, 1, 1), "ctrl_shift_alt": (1, 1, 1)}.get(str(mods))
+    bits = {
+        "none": (0, 0, 0),
+        "shift": (1, 0, 0),
+        "ctrl": (0, 1, 0),
+        "alt": (0, 0, 1),
+        "ctrl_shift": (1, 1, 0),
+        "shift_alt": (1, 0, 1),
+        "ctrl_alt": (0, 1, 1),
+        "ctrl_shift_alt": (1, 1, 1),
+    }.get(str(mods))
     return tuple(bool(x) for x in (bits or (0, 0, 0)))
 
 
@@ -304,8 +389,9 @@ def set_action(keymap, area, mods, btn, action):
 
 def dump(keymap):
     """序列化为紧凑 JSON（持久化用）；键顺序固定、纯 ASCII 无关。"""
-    data = dict((a, [list(r) for r in (keymap or {}).get(a) or DEFAULTS[a]])
-                for a in AREA_IDS)
+    data = {
+        a: [list(r) for r in (keymap or {}).get(a) or DEFAULTS[a]] for a in AREA_IDS
+    }
     return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -313,6 +399,6 @@ def parse(text):
     """反序列化 + 规范化；空串 / 坏 JSON 一律返回默认表。"""
     try:
         raw = json.loads(text or "")
-    except Exception:
+    except (json.JSONDecodeError, TypeError):
         raw = None
     return normalize(raw)

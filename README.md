@@ -256,9 +256,11 @@ Nix 包在插件目录提供私有 `_python_dependencies` symlink，指向锁定
 
 普通启动验证使用系统 `/run/current-system/sw/bin/krita`，未注入自定义 `PYTHONPATH` 或插件 `XDG_DATA_DIRS`；NumPy 从安装目录关联的私有运行时加载，导入后搜索路径恢复。安装器的升级、重复执行、Nix GC root 注册和保留用户文件的卸载均已检查。
 
-开发回归检查（NumPy、PyQt6 由开发环境提供）：
+开发检查（另需安装 Ruff；NumPy、PyQt6 由开发环境提供）：
 
 ```sh
+ruff check .
+ruff format --check .
 nix develop --command env QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
 ```
 
@@ -650,9 +652,11 @@ Verified on NixOS `x86_64-linux`, KDE native Wayland and XWayland (Qt `xcb`), wi
 
 The direct-install probe used the ordinary system `/run/current-system/sw/bin/krita`, without custom `PYTHONPATH` or plugin `XDG_DATA_DIRS`. NumPy loaded from the installed private runtime and the temporary search path was removed. Real installer upgrades, repeated installation, Nix GC-root registration and ownership-safe uninstall were exercised.
 
-Development regressions, using the development shell's NumPy and PyQt6:
+Development checks (install Ruff separately; the development shell supplies NumPy and PyQt6):
 
 ```sh
+ruff check .
+ruff format --check .
 nix develop --command env QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
 ```
 

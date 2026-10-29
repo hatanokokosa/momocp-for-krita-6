@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """历史颜色网格：单列、格子 16×16、行数自适应高度（与拾色器等高）。
 
 数据是纯 Python 列表（`["#RRGGBB", ...]`），由面板负责持久化与增删，
@@ -9,13 +8,13 @@ from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import QWidget
 
-try:                        # 插件内：包内相对导入
+try:  # 插件内：包内相对导入
     from . import i18n
-except ImportError:         # 离线单测：直接把本目录加进 sys.path
+except ImportError:  # 离线单测：直接把本目录加进 sys.path
     import i18n
 
-CELL = 16          # 格子边长（px）
-WIDTH = 16         # 单列
+CELL = 16  # 格子边长（px）
+WIDTH = 16  # 单列
 
 
 class HistoryWidget(QWidget):
@@ -23,7 +22,7 @@ class HistoryWidget(QWidget):
         super().__init__(parent)
         self.setFixedWidth(WIDTH)
         self.setMinimumHeight(CELL)
-        self.colors = []                 # ["#RRGGBB", ...]，按可见行数截断
+        self.colors = []  # ["#RRGGBB", ...]，按可见行数截断
         self._on_pick = on_pick
         self.setToolTip(i18n.t("历史颜色：单击取用", "History colors: click to use"))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
@@ -35,10 +34,10 @@ class HistoryWidget(QWidget):
     def capacity(self):
         return self.rows()
 
-    MAX_KEEP = 128     # 模型里最多保留 128 个（显示几个由高度决定）
+    MAX_KEEP = 128  # 模型里最多保留 128 个（显示几个由高度决定）
 
     def set_colors(self, colors):
-        self.colors = list(colors)[:self.MAX_KEEP]
+        self.colors = list(colors)[: self.MAX_KEEP]
         self.update()
 
     def _cells(self):

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """「按键功能」自定义按键表（R14）。
 
 表格三列：**区域 | 输入 | 动作**。
@@ -13,9 +12,19 @@
 """
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QHBoxLayout,
-                             QHeaderView, QLabel, QMessageBox, QPushButton,
-                             QTableWidget, QTableWidgetItem, QVBoxLayout)
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
 
 try:
     from . import i18n
@@ -28,10 +37,7 @@ ROW_H = 26
 
 
 def _zh():
-    try:
-        return bool(i18n.is_zh())
-    except Exception:
-        return True
+    return bool(i18n.is_zh())
 
 
 class InputEditor(QDialog):
@@ -88,12 +94,16 @@ class KeymapDialog(QDialog):
         self.setMinimumSize(660, 480)
         self.resize(720, 660)
         root = QVBoxLayout(self)
-        self.lbl_hint = QLabel(i18n.t(
-            "点「输入」修改鼠标键与修饰键，点「动作」下拉改功能；改完立即生效并持久化。"
-            "同一区域内同一「修饰键+鼠标键」不能重复。",
-            "Click Input to change the mouse button and modifier, click the Action cell to "
-            "choose the function. Changes take effect and are stored immediately. The same "
-            "modifier+button cannot repeat within one area."), self)
+        self.lbl_hint = QLabel(
+            i18n.t(
+                "点「输入」修改鼠标键与修饰键，点「动作」下拉改功能；改完立即生效并持久化。"
+                "同一区域内同一「修饰键+鼠标键」不能重复。",
+                "Click Input to change the mouse button and modifier, click the Action cell to "
+                "choose the function. Changes take effect and are stored immediately. The same "
+                "modifier+button cannot repeat within one area.",
+            ),
+            self,
+        )
         self.lbl_hint.setWordWrap(True)
         root.addWidget(self.lbl_hint)
 
@@ -107,7 +117,7 @@ class KeymapDialog(QDialog):
         vheader.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         vheader.setDefaultSectionSize(ROW_H)
         vheader.setMinimumSectionSize(18)
-        vheader.setMaximumSectionSize(ROW_H)      # 行高固定 26px（不被单元格控件撑大）
+        vheader.setMaximumSectionSize(ROW_H)  # 行高固定 26px（不被单元格控件撑大）
         root.addWidget(self.table, 1)
 
         bottom = QHBoxLayout()
@@ -167,7 +177,8 @@ class KeymapDialog(QDialog):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setRowCount(len(specs))
         self.table.setHorizontalHeaderLabels(
-            [i18n.t("区域", "Area"), i18n.t("输入", "Input"), i18n.t("动作", "Action")])
+            [i18n.t("区域", "Area"), i18n.t("输入", "Input"), i18n.t("动作", "Action")]
+        )
         for r, (area, mods, btn, act, is_add) in enumerate(specs):
             self.table.setRowHeight(r, ROW_H)
             self.table.setItem(r, 0, QTableWidgetItem(kc.area_label(area, zh)))
@@ -181,7 +192,8 @@ class KeymapDialog(QDialog):
             pick = QPushButton(kc.input_label(mods, btn, zh), self.table)
             pick.setFixedHeight(max(16, ROW_H - 4))
             pick.clicked.connect(
-                lambda _c=False, a=area, m=mods, b=btn: self._on_edit_input(a, m, b))
+                lambda _c=False, a=area, m=mods, b=btn: self._on_edit_input(a, m, b)
+            )
             self.table.setCellWidget(r, 1, pick)
             combo = QComboBox(self.table)
             combo.setFixedHeight(max(16, ROW_H - 4))
@@ -192,24 +204,27 @@ class KeymapDialog(QDialog):
             combo.setCurrentIndex(max(0, idx))
             combo.blockSignals(False)
             combo.currentIndexChanged.connect(
-                lambda _i, a=area, m=mods, b=btn, c=combo: self._on_action(a, m, b, c.currentData()))
+                lambda _i, a=area, m=mods, b=btn, c=combo: self._on_action(
+                    a, m, b, c.currentData()
+                )
+            )
             self.table.setCellWidget(r, 2, combo)
-
 
     # ---------------------------------------------------------------- 交互
     def _notify(self):
         if self._on_change is not None:
-            try:
-                self._on_change(self.keymap)
-            except Exception:
-                pass
+            self._on_change(self.keymap)
 
     def _warn_duplicate(self, area, mods, btn):
         QMessageBox.warning(
-            self, i18n.t("按键功能", "Key functions"),
-            i18n.t("「%s」区域内「%s」已被占用，请换一个输入。",
-                   "Input \"%s\" is already used in area \"%s\"; choose another.")
-            % (kc.input_label(mods, btn, _zh()), kc.area_label(area, _zh())))
+            self,
+            i18n.t("按键功能", "Key functions"),
+            i18n.t(
+                "「%s」区域内「%s」已被占用，请换一个输入。",
+                'Input "%s" is already used in area "%s"; choose another.',
+            )
+            % (kc.input_label(mods, btn, _zh()), kc.area_label(area, _zh())),
+        )
 
     def change_action(self, area, mods, btn, action):
         """把某输入的动作改成 action（表格与自检共用入口）。"""
@@ -278,9 +293,15 @@ class KeymapDialog(QDialog):
 
     def _on_reset(self):
         ans = QMessageBox.question(
-            self, i18n.t("恢复默认", "Restore defaults"),
-            i18n.t("把所有区域的输入与动作恢复为默认值？", "Restore all areas to the default inputs and actions?"),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            self,
+            i18n.t("恢复默认", "Restore defaults"),
+            i18n.t(
+                "把所有区域的输入与动作恢复为默认值？",
+                "Restore all areas to the default inputs and actions?",
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
         if ans == QMessageBox.StandardButton.Yes:
             self.keymap = kc.default_keymap()
             self._notify()

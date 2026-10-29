@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """两条横向色条：明度条（左=0）与彩度条（左=0，线性坐标）。
 
 · 明度条：横向渐变 = 当前色相下沿「等明度线」变化的灰阶/彩色过渡，
@@ -24,8 +23,11 @@ except ImportError:
 STRIP_H = 22
 
 # 键表不支持的 Qt 修饰位（Meta / Keypad / GroupSwitch 等）：出现即落回「无修饰」行
-_UNKNOWN_QT_MODS = (Qt.KeyboardModifier.MetaModifier | Qt.KeyboardModifier.KeypadModifier
-                    | getattr(Qt.KeyboardModifier, "GroupSwitchModifier", Qt.KeyboardModifier(0)))
+_UNKNOWN_QT_MODS = (
+    Qt.KeyboardModifier.MetaModifier
+    | Qt.KeyboardModifier.KeypadModifier
+    | getattr(Qt.KeyboardModifier, "GroupSwitchModifier", Qt.KeyboardModifier(0))
+)
 
 
 class StripBase(QWidget):
@@ -43,11 +45,11 @@ class StripBase(QWidget):
         self.setFixedHeight(STRIP_H)
         self.setMinimumWidth(120)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
-        self.value = 0.0            # 归一化位置（0=最左，1=最右）
+        self.value = 0.0  # 归一化位置（0=最左，1=最右）
         self._on_changed = on_changed
         self._dragging = False
         self._press_button = Qt.MouseButton.LeftButton
-        self.keymap = kmc.default_keymap()      # 自定义按键表
+        self.keymap = kmc.default_keymap()  # 自定义按键表
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
     def set_keymap(self, keymap):
@@ -63,10 +65,12 @@ class StripBase(QWidget):
         return "left"
 
     def _action_for(self, btn, mods):
-        mod = kmc.mods_from_bools(bool(mods & Qt.KeyboardModifier.ShiftModifier),
-                                  bool(mods & Qt.KeyboardModifier.ControlModifier),
-                                  bool(mods & Qt.KeyboardModifier.AltModifier),
-                                  bool(mods & _UNKNOWN_QT_MODS))
+        mod = kmc.mods_from_bools(
+            bool(mods & Qt.KeyboardModifier.ShiftModifier),
+            bool(mods & Qt.KeyboardModifier.ControlModifier),
+            bool(mods & Qt.KeyboardModifier.AltModifier),
+            bool(mods & _UNKNOWN_QT_MODS),
+        )
         return kmc.lookup(self.keymap, self.AREA, self._btn_id(btn), mod)
 
     # ---- 子类实现 ----
@@ -76,12 +80,12 @@ class StripBase(QWidget):
 
     def text_for(self, t):
         """归一化位置 -> 显示文本。"""
-        return "%.4f" % t
+        return f"{t:.4f}"
 
     # ---- 通用绘制 ----
     def dead_mask(self, width):
         """返回布尔数组：True 处表示「该位置当前拖不到」；默认无死区（返回 None）。"""
-        return None
+        return
 
     def _paint_dead(self, p, w):
         """把不可达区段画成「半透明灰底 + 斜纹」（a/b 条与绝对彩度条的死区共用）。"""
@@ -103,18 +107,21 @@ class StripBase(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         for a0, b0 in spans:
             x0, x1 = float(a0), float(b0) + 1.0
-            p.fillRect(QRectF(x0, 0.0, x1 - x0, float(STRIP_H)), QColor(58, 58, 58, 165))
+            p.fillRect(
+                QRectF(x0, 0.0, x1 - x0, float(STRIP_H)), QColor(58, 58, 58, 165)
+            )
             p.setPen(QPen(QColor(150, 150, 150, 120), 1.0))
             x = x0 - STRIP_H
             while x < x1:
-                p.drawLine(QPointF(max(x, x0), float(STRIP_H) - 1.0),
-                           QPointF(min(x + STRIP_H, x1), 0.0))
+                p.drawLine(
+                    QPointF(max(x, x0), float(STRIP_H) - 1.0),
+                    QPointF(min(x + STRIP_H, x1), 0.0),
+                )
                 x += 6.0
 
     def paintEvent(self, event):
         w = max(2, self.width())
         arr = self.strip_image(w)
-        from PyQt6.QtGui import QImage
         arr = np.ascontiguousarray(arr, dtype=np.uint8)
         img = QImage(arr.data, w, STRIP_H, w * 3, QImage.Format.Format_RGB888)
         p = QPainter(self)
@@ -124,10 +131,12 @@ class StripBase(QWidget):
         p.drawRect(0, 0, w - 1, STRIP_H - 1)
         # 游标
         x = self.value * (w - 1)
-        for pen, dy in ((QPen(QColor(0, 0, 0, 200), 3), 0), (QPen(QColor(255, 255, 255, 235), 1.6), 0)):
+        for pen, dy in (
+            (QPen(QColor(0, 0, 0, 200), 3), 0),
+            (QPen(QColor(255, 255, 255, 235), 1.6), 0),
+        ):
             p.setPen(pen)
             p.drawLine(QPointF(x, 1.0), QPointF(x, STRIP_H - 1.0))
-        return
 
     # ---- 交互 ----
     def _apply(self, pos):
@@ -138,7 +147,11 @@ class StripBase(QWidget):
             self._on_changed(self.value)
 
     def mousePressEvent(self, event):
-        if event.button() not in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
+        if event.button() not in (
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.MiddleButton,
+            Qt.MouseButton.RightButton,
+        ):
             event.ignore()
             return
         if self._action_for(event.button(), event.modifiers()) == "none":
@@ -172,8 +185,14 @@ class LightnessStrip(StripBase):
 
     AREA = "lstrip"
 
-    def __init__(self, parent=None, on_changed=None, metric="oklab",
-                 on_press=None, on_release=None):
+    def __init__(
+        self,
+        parent=None,
+        on_changed=None,
+        metric="oklab",
+        on_press=None,
+        on_release=None,
+    ):
         super().__init__(parent, on_changed, on_press, on_release)
         self.metric = metric
         self.hue = 0.0
@@ -205,11 +224,10 @@ class LightnessStrip(StripBase):
 
     def text_for(self, t):
         L = float(t) * (1.0 if self.metric in ("oklab", "gray") else 100.0)
-        return "%.4f" % L if self.metric in ("oklab", "gray") else "%.2f" % L
+        return f"{L:.4f}" if self.metric in ("oklab", "gray") else f"{L:.2f}"
 
 
 class ChromaStrip(StripBase):
-
     AREA = "cstrip"
     """彩度条：**线性坐标**（相对模式 = C_rel，绝对模式 = C / 量程上界）。
 
@@ -227,17 +245,20 @@ class ChromaStrip(StripBase):
         super().__init__(parent, on_changed, on_press, on_release)
         self.hue = 0.0
         self.target_l = 0.5
-        self.metric = "oklab"       # L 轴口径（oklab / gray），由面板灌入
+        self.metric = "oklab"  # L 轴口径（oklab / gray），由面板灌入
         self.mode = "rel"
         self.full = False
         self._cache_key = None
         self._cache = None
         self._ctx_key = None
         self._curve_cache = None
-        self.setToolTip(i18n.t(
-            "彩度条：拖动改彩度（明度不动）。默认相对彩度 C_rel（0~1）；可切成绝对彩度 C",
-            "Chroma strip: drag to change chroma (lightness stays). Default is relative chroma "
-            "C_rel (0-1); can switch to absolute chroma C"))
+        self.setToolTip(
+            i18n.t(
+                "彩度条：拖动改彩度（明度不动）。默认相对彩度 C_rel（0~1）；可切成绝对彩度 C",
+                "Chroma strip: drag to change chroma (lightness stays). Default is relative chroma "
+                "C_rel (0-1); can switch to absolute chroma C",
+            )
+        )
 
     # ---- 上下文与口径 ----
     def set_context(self, hue, target_l):
@@ -275,7 +296,7 @@ class ChromaStrip(StripBase):
         try:
             arr = mc.cmax_of_L(self.hue, self.metric, np.array([float(self.target_l)]))
             return float(np.asarray(arr, dtype=np.float64).reshape(-1)[0])
-        except Exception:
+        except (TypeError, ValueError, FloatingPointError):
             return 0.0
 
     def range_hi(self):
@@ -293,7 +314,7 @@ class ChromaStrip(StripBase):
             return t
         v = t * self.range_hi()
         if not self.full:
-            v = min(v, self._cmax_now())      # 固定量程：死区里拖不动
+            v = min(v, self._cmax_now())  # 固定量程：死区里拖不动
         return v
 
     def t_of(self, value):
@@ -308,23 +329,33 @@ class ChromaStrip(StripBase):
         """当前 (hue, target_l) 的等明度曲线采样：(S, V, 绝对 C)，按 C 单调递增。"""
         if self._curve_cache is None:
             try:
-                ss, vv = mc.iso_lightness_curve(self.hue, self.target_l, self.metric,
-                                                       n_v=129, iters=30)
-            except Exception:
+                ss, vv = mc.iso_lightness_curve(
+                    self.hue, self.target_l, self.metric, n_v=129, iters=30
+                )
+            except (TypeError, ValueError, FloatingPointError):
                 ss, vv = np.array([]), np.array([])
             if len(ss) >= 2:
                 cc = np.asarray(mc.ok_L_C(self.hue, ss, vv)[1], dtype=np.float64)
                 cc = np.maximum.accumulate(np.clip(cc, 0.0, None))
-                self._curve_cache = (np.asarray(ss, dtype=np.float64),
-                                     np.asarray(vv, dtype=np.float64), cc)
+                self._curve_cache = (
+                    np.asarray(ss, dtype=np.float64),
+                    np.asarray(vv, dtype=np.float64),
+                    cc,
+                )
             else:
                 self._curve_cache = False
         return self._curve_cache if self._curve_cache else None
 
     def strip_image(self, width):
         width = int(max(2, width))
-        key = (width, round(self.hue, 3), round(self.target_l, 4), self.mode,
-               self.full, self.metric)
+        key = (
+            width,
+            round(self.hue, 3),
+            round(self.target_l, 4),
+            self.mode,
+            self.full,
+            self.metric,
+        )
         if self._cache is not None and self._cache_key == key:
             return self._cache
         t = np.linspace(0.0, 1.0, width)
@@ -333,9 +364,9 @@ class ChromaStrip(StripBase):
         if data is not None:
             ss, vv, cc = data
             if self.mode == "rel":
-                vals = t * self._cmax_now()          # t = C_rel -> 绝对 C
+                vals = t * self._cmax_now()  # t = C_rel -> 绝对 C
             else:
-                vals = t * self.range_hi()           # 绝对模式：固定量程 / 满量程
+                vals = t * self.range_hi()  # 绝对模式：固定量程 / 满量程
             s_x = np.interp(vals, cc, ss)
             v_x = np.interp(vals, cc, vv)
             rgb = mc.hsv_to_srgb(np.full_like(t, self.hue), s_x, v_x)
@@ -353,14 +384,14 @@ class ChromaStrip(StripBase):
         return vals > (self._cmax_now() + 1e-9)
 
     def text_for(self, t):
-        return "%.4f" % self.value_of_t(t)
+        return f"{self.value_of_t(t):.4f}"
 
     # ---- 交互：值与位置不是同一个数，覆写 _apply ----
     def _apply(self, pos):
         w = max(1, self.width())
         t = mc.clamp(pos.x() / float(w), 0.0, 1.0)
         value = self.value_of_t(t)
-        self.value = self.t_of(value)        # 游标画在「钳后」的位置
+        self.value = self.t_of(value)  # 游标画在「钳后」的位置
         self.update()
         if self._on_changed is not None:
             self._on_changed(value)
@@ -377,8 +408,15 @@ class AbStrip(StripBase):
     一条的「游标位置」= 本分量在**显示量程**里的归一化位置；可达区间由 ranges()[1] 给出。
     """
 
-    def __init__(self, parent=None, axis="a", mode="box",
-                 on_changed=None, on_press=None, on_release=None):
+    def __init__(
+        self,
+        parent=None,
+        axis="a",
+        mode="box",
+        on_changed=None,
+        on_press=None,
+        on_release=None,
+    ):
         super().__init__(parent, on_changed, on_press, on_release)
         self.axis = "a" if axis == "a" else "b"
         self.AREA = "astrip" if self.axis == "a" else "bstrip"
@@ -389,10 +427,14 @@ class AbStrip(StripBase):
         self._ctx_key = None
         self._cache = None
         self._cache_key = None
-        self.setToolTip(i18n.t(
-            "Oklab %s 分量：拖动改本分量（明度与另一个分量不动）；灰色斜纹段当前不可达",
-            "Oklab %s component: drag to change it (L and the other component stay);"
-            " hatched spans are unreachable at this color") % self.axis)
+        self.setToolTip(
+            i18n.t(
+                "Oklab %s 分量：拖动改本分量（明度与另一个分量不动）；灰色斜纹段当前不可达",
+                "Oklab %s component: drag to change it (L and the other component stay);"
+                " hatched spans are unreachable at this color",
+            )
+            % self.axis
+        )
 
     # ---- 上下文 ----
     def set_context(self, L, a, b):
@@ -453,20 +495,20 @@ class AbStrip(StripBase):
 
     def dead_mask(self, width):
         if self.mode == "line":
-            return None                      # 满量程恒可达
+            return None  # 满量程恒可达
         disp, live = self.ranges()
         vals = disp[0] + np.linspace(0.0, 1.0, int(max(2, width))) * (disp[1] - disp[0])
         return (vals < live[0] - 1e-9) | (vals > live[1] + 1e-9)
 
     def text_for(self, t):
-        return "%+.4f" % self.value_of_t(t)
+        return f"{self.value_of_t(t):+.4f}"
 
     # ---- 交互：值域不是 0~1，覆写 _apply ----
     def _apply(self, pos):
         w = max(1, self.width())
         t = mc.clamp(pos.x() / float(w), 0.0, 1.0)
         value = self.value_of_t(t)
-        self.value = self.t_of(value)        # 游标画在「钳后」的位置
+        self.value = self.t_of(value)  # 游标画在「钳后」的位置
         self.update()
         if self._on_changed is not None:
             self._on_changed(value)

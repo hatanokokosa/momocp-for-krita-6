@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """诊断日志模式（T-16）：把拾色器交互与内部状态写入文件，供离线排查。
 
 约束：
@@ -16,11 +15,11 @@ import time
 _ENABLED = False
 _PATH = ""
 _BUF = []
-_BUFSIZE = 30            # 攒够多少行刷一次盘
-_FLUSH_INTERVAL = 0.5    # 或距上次刷盘超过该秒数
+_BUFSIZE = 30  # 攒够多少行刷一次盘
+_FLUSH_INTERVAL = 0.5  # 或距上次刷盘超过该秒数
 _MAX_BYTES = 2 * 1024 * 1024
 _LAST_FLUSH = 0.0
-_THROTTLE = {}           # event -> 上次写盘 monotonic 时间
+_THROTTLE = {}  # event -> 上次写盘 monotonic 时间
 _WARNED = False
 _SESSION_STARTED = False  # 本进程是否已开启过日志（第一次开启覆盖旧日志）
 
@@ -88,8 +87,8 @@ def _truncate_for_session():
             os.makedirs(folder, exist_ok=True)
         with open(_PATH, "w", encoding="utf-8", newline="\n"):
             pass
-    except Exception:
-        pass
+    except OSError:
+        return
 
 
 def _fmt(value):
@@ -98,15 +97,14 @@ def _fmt(value):
     if isinstance(value, bool):
         return "1" if value else "0"
     if isinstance(value, float):
-        return "%.6g" % value
+        return f"{value:.6g}"
     text = str(value).replace(" ", "_").replace("\n", "\\n").replace("\r", "")
     return text[:200]
 
 
 def _stamp():
     now = time.time()
-    return "%s.%03d" % (time.strftime("%H:%M:%S", time.localtime(now)),
-                        int((now % 1.0) * 1000.0))
+    return f"{time.strftime('%H:%M:%S', time.localtime(now))}.{int((now % 1.0) * 1000.0):03d}"
 
 
 def log(event, **fields):
@@ -114,8 +112,8 @@ def log(event, **fields):
     if not _ENABLED:
         return
     parts = [_stamp(), str(event)]
-    for key in fields:
-        parts.append("%s=%s" % (key, _fmt(fields[key])))
+    for key, value in fields.items():
+        parts.append(f"{key}={_fmt(value)}")
     _BUF.append(" ".join(parts))
     if len(_BUF) >= _BUFSIZE:
         flush(force=True)
@@ -152,7 +150,7 @@ def flush(force=False):
         _rotate_if_needed()
         with open(_PATH, "a", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
-    except Exception:
+    except (OSError, UnicodeError):
         _disable_on_error()
 
 
@@ -160,8 +158,8 @@ def _rotate_if_needed():
     try:
         if os.path.isfile(_PATH) and os.path.getsize(_PATH) > _MAX_BYTES:
             os.replace(_PATH, _PATH + ".1")
-    except Exception:
-        pass
+    except OSError:
+        return
 
 
 def _disable_on_error():
@@ -172,5 +170,5 @@ def _disable_on_error():
         _WARNED = True
         try:
             sys.stderr.write("[hsv_picker] 诊断日志写入失败，已自动关闭\n")
-        except Exception:
-            pass
+        except (OSError, UnicodeError):
+            return

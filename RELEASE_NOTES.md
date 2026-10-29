@@ -35,6 +35,7 @@ The supported deployment for this Qt6 port is Linux through the repository's Nix
 - Source archives and Nix plugin packages include the GPL license; source releases no longer bundle platform-specific NumPy binaries.
 - Grouped dock controls: current-color swatch, HEX and native Settings icon have a dedicated row; H/S/V share a second row. Content padding and consistent strip spacing replace the crowded single-row layout. Minimum sizes follow native font/style metrics, including runtime font changes; the popup's default height now follows actual control height instead of a fixed aspect ratio.
   Layout verification exercised 300/375/600 logical-pixel dock widths at 1.25 device scaling, then enlarged the native font by 25%. All fields remained inside the padded content area with complete values; a/b visibility, HEX submission, tab navigation, settings-menu display, popup layout and shutdown were exercised in Krita.
+- Ruff cleanup: narrowed expected Qt, parsing and IO failures instead of ignoring diagnostics; restored the keymap language helper, made NaN handling explicit, and removed an unused helper that referenced undefined `BG`. Python sources follow Ruff formatting.
 
 1. Run `nix run .#install-plugin` once (use `path:.#install-plugin` for an untracked checkout). It installs user data links and registers a persistent Nix GC root; it does not start Krita.
 2. Start your existing Krita from the application menu or with `krita`. Enable the plugin in Python Plugin Manager and restart. `nix develop` provides the development/test environment.
@@ -45,6 +46,8 @@ The plugin package associates a private ABI-matched NumPy runtime with the plugi
 Verification: the Nix-built plugin passed actual Krita 6.0.4.1 GUI probes on NixOS x86_64, both native Wayland and XWayland (`xcb`), using Python 3.14.8 and NumPy 2.5.3. Four standalone Qt6 regressions passed for RGB/RGBA buffer ownership, fractional history-cell hit testing and dialog flag transitions. Source archive layout, action/desktop descriptors, GPL license and absence of native vendor binaries were checked. Physical multi-monitor operation, aarch64 and Windows were not runtime-tested.
 
 Launcher-free deployment verification used the ordinary system Krita executable with isolated user data and no custom Python/data search environment. Private NumPy and linalg remained functional after removing the temporary import path; foreground input, popup/preview, shortcuts and shutdown passed. Installer upgrades, idempotency, registered GC roots and settings-preserving uninstall were exercised. The regression suite now has six passing cases, including refusal to partially install on conflicts and preservation of user replacements on uninstall.
+
+Ruff 0.17.2 reported no diagnostics and all checked files passed the formatting check. The six regressions passed after cleanup; 111 before/after comparisons preserved exact numerical, label and parser results. Keymap fallback and debug-log success/failure paths were also exercised. Ordinary Krita passed native Wayland and XWayland probes after cleanup, covering larger fonts, managed foreground-color conversion, English/Chinese keymap dialogs, settings menus, preview/popup lifecycle and process shutdown.
 
 ## Historical Windows package status
 
