@@ -4,7 +4,7 @@ import sys
 import tempfile
 import traceback
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 
 # Nix installs an ABI-matched NumPy runtime beside the plugin. Expose it only
 # during import, without changing Krita's launch environment or leaving extra

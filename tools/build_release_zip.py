@@ -2,7 +2,7 @@
 
 Usage::
 
-    python tools/build_release_zip.py [--version 1.1.0] [--out dist]
+    python tools/build_release_zip.py [--version 2.0.0] [--out dist]
 
 The archive contains the Qt6/Krita6 plugin source, desktop descriptor, action
 file, manual, and installation notes.  It deliberately does *not* contain the

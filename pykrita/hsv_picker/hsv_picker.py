@@ -62,7 +62,7 @@ try:  # 插件内：包内相对导入
     from . import debug_log as dlog
     from .drag_edit import DragValueEdit
 except ImportError:  # 离线单测：直接把本目录加进 sys.path
-    __version__ = "1.1.0"
+    __version__ = "2.0.0"
     import debug_log as dlog
     import history_widget
     import i18n

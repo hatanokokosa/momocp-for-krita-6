@@ -1,8 +1,40 @@
-# Momo Color Picker 1.1.0
+# Momo Color Picker 2.0.0
 
 Momo Color Picker is an Oklab/Oklch-aware color picker plugin for Krita. It keeps the familiar HSV-style hue ring and S/V square, while lightness and chroma are locked and read in Oklab (or in Krita's grayscale soft-proof value).
 
 ![Overview](https://raw.githubusercontent.com/zmom0/momo-color-picker/windows-release/pykrita/hsv_picker/manual/images/demo-first.gif)
+
+*The illustration uses the historical layout; 2.0.0 groups color and HSV controls into separate rows.*
+
+## Changes in 2.0.0 — Krita 6 / Qt6
+
+**Breaking release:** Krita 6 / Qt6 is required; Krita 5 is no longer supported. The obsolete Windows NumPy bundle is not included. Linux/Nix is the verified deployment; Windows remains unverified.
+
+The supported deployment for this Qt6 port is Linux through the repository's Nix flake:
+
+- Qt6-only Python bindings, scoped enums, floating-point mouse positions, native key combinations and dialog execution; Krita plugin/action/settings IDs are preserved.
+- Native Wayland uses a resizable subwindow and passive preview inside Krita. The size grip has its own footer rather than intercepting numeric-field input; host resizing preserves the remembered user size. X11/XWayland uses a parented tool window.
+- Numeric-field measurements include the active Qt style's inner frame margins, avoiding clipped values under KDE Breeze.
+- Shortcut matching reads the current Krita action, including shortcut changes made during the session, without stealing text input.
+- Removed the obsolete Windows NumPy vendor tree. Linux diagnostic logs use `XDG_STATE_HOME` (default `~/.local/state`), with `HSV_PICKER_DEBUG_LOG` still available as an override.
+- Source archives and Nix plugin packages include the GPL license; source releases no longer bundle platform-specific NumPy binaries.
+- Grouped dock controls: current-color swatch, HEX and native Settings icon have a dedicated row; H/S/V share a second row. Content padding and consistent strip spacing replace the crowded single-row layout. Minimum sizes follow native font/style metrics, including runtime font changes; the popup's default height now follows actual control height instead of a fixed aspect ratio.
+  Layout verification exercised 300/375/600 logical-pixel dock widths at 1.25 device scaling, then enlarged the native font by 25%. All fields remained inside the padded content area with complete values; a/b visibility, HEX submission, tab navigation, settings-menu display, popup layout and shutdown were exercised in Krita.
+- Ruff cleanup: narrowed expected Qt, parsing and IO failures instead of ignoring diagnostics; restored the keymap language helper, made NaN handling explicit, and removed an unused helper that referenced undefined `BG`. Python sources follow Ruff formatting.
+
+1. Run `nix run .#install-plugin` once (use `path:.#install-plugin` for an untracked checkout). It installs user data links and registers a persistent Nix GC root; it does not start Krita.
+2. Start your existing Krita from the application menu or with `krita`. Enable the plugin in Python Plugin Manager and restart. `nix develop` provides the development/test environment.
+3. The source release asset is `MomoColorPicker-2.0.0-krita6-source.zip`. It contains no native NumPy extension and is platform-neutral plugin source.
+
+The plugin package associates a private ABI-matched NumPy runtime with the plugin directory, imports NumPy with a temporary search path, then removes that path. No custom Krita launcher, `PYTHONPATH` or `XDG_DATA_DIRS` changes are needed. Installation refuses foreign files, preflights conflicts before mutation, and supports idempotent upgrades through a stable registered GC root; uninstall preserves unrelated files and settings. Ordinary Krita must use a compatible Python ABI. Native Wayland popup behavior remains host-local, not desktop-global always-on-top.
+
+Verification: the Nix-built plugin passed actual Krita 6.0.4.1 GUI probes on NixOS x86_64, both native Wayland and XWayland (`xcb`), using Python 3.14.8 and NumPy 2.5.3. Four standalone Qt6 regressions passed for RGB/RGBA buffer ownership, fractional history-cell hit testing and dialog flag transitions. Source archive layout, action/desktop descriptors, GPL license and absence of native vendor binaries were checked. Physical multi-monitor operation, aarch64 and Windows were not runtime-tested.
+
+Launcher-free deployment verification used the ordinary system Krita executable with isolated user data and no custom Python/data search environment. Private NumPy and linalg remained functional after removing the temporary import path; foreground input, popup/preview, shortcuts and shutdown passed. Installer upgrades, idempotency, registered GC roots and settings-preserving uninstall were exercised. The regression suite now has six passing cases, including refusal to partially install on conflicts and preservation of user replacements on uninstall.
+
+Ruff 0.17.2 reported no diagnostics and all checked files passed the formatting check. The six regressions passed after cleanup; 111 before/after comparisons preserved exact numerical, label and parser results. Keymap fallback and debug-log success/failure paths were also exercised. Ordinary Krita passed native Wayland and XWayland probes after cleanup, covering larger fonts, managed foreground-color conversion, English/Chinese keymap dialogs, settings menus, preview/popup lifecycle and process shutdown.
+
+Release packaging verification checked the embedded 2.0.0 version, GPL license, importer layout and absence of native dependency/cache files. The 2.0.0 Nix plugin and installer built successfully; a real 1.1.0 → 2.0.0 upgrade, repeated installation, private NumPy discovery, settings preservation and uninstall passed in isolated user directories.
 
 ## Changes in 1.1.0
 
@@ -23,31 +55,6 @@ Momo Color Picker is an Oklab/Oklch-aware color picker plugin for Krita. It keep
 - Simplified Chinese / English manual and reproducible image assets.
 - Release packaging: one Windows zip with bundled numpy 2.3.0, portable `install.bat`, GPL-3.0 license text and a tag-triggered GitHub Actions release workflow.
 
-## Krita 6 / Qt6 Nix port
-
-The supported deployment for this Qt6 port is Linux through the repository's Nix flake:
-
-- Qt6-only Python bindings, scoped enums, floating-point mouse positions, native key combinations and dialog execution; Krita plugin/action/settings IDs are preserved.
-- Native Wayland uses a resizable subwindow and passive preview inside Krita. The size grip has its own footer rather than intercepting numeric-field input; host resizing preserves the remembered user size. X11/XWayland uses a parented tool window.
-- Numeric-field measurements include the active Qt style's inner frame margins, avoiding clipped values under KDE Breeze.
-- Shortcut matching reads the current Krita action, including shortcut changes made during the session, without stealing text input.
-- Removed the obsolete Windows NumPy vendor tree. Linux diagnostic logs use `XDG_STATE_HOME` (default `~/.local/state`), with `HSV_PICKER_DEBUG_LOG` still available as an override.
-- Source archives and Nix plugin packages include the GPL license; source releases no longer bundle platform-specific NumPy binaries.
-- Grouped dock controls: current-color swatch, HEX and native Settings icon have a dedicated row; H/S/V share a second row. Content padding and consistent strip spacing replace the crowded single-row layout. Minimum sizes follow native font/style metrics, including runtime font changes; the popup's default height now follows actual control height instead of a fixed aspect ratio.
-  Layout verification exercised 300/375/600 logical-pixel dock widths at 1.25 device scaling, then enlarged the native font by 25%. All fields remained inside the padded content area with complete values; a/b visibility, HEX submission, tab navigation, settings-menu display, popup layout and shutdown were exercised in Krita.
-- Ruff cleanup: narrowed expected Qt, parsing and IO failures instead of ignoring diagnostics; restored the keymap language helper, made NaN handling explicit, and removed an unused helper that referenced undefined `BG`. Python sources follow Ruff formatting.
-
-1. Run `nix run .#install-plugin` once (use `path:.#install-plugin` for an untracked checkout). It installs user data links and registers a persistent Nix GC root; it does not start Krita.
-2. Start your existing Krita from the application menu or with `krita`. Enable the plugin in Python Plugin Manager and restart. `nix develop` provides the development/test environment.
-3. The source release asset is `MomoColorPicker-1.1.0-krita6-source.zip`. It contains no native NumPy extension and is platform-neutral plugin source.
-
-The plugin package associates a private ABI-matched NumPy runtime with the plugin directory, imports NumPy with a temporary search path, then removes that path. No custom Krita launcher, `PYTHONPATH` or `XDG_DATA_DIRS` changes are needed. Installation refuses foreign files, preflights conflicts before mutation, and supports idempotent upgrades through a stable registered GC root; uninstall preserves unrelated files and settings. Ordinary Krita must use a compatible Python ABI. Native Wayland popup behavior remains host-local, not desktop-global always-on-top.
-
-Verification: the Nix-built plugin passed actual Krita 6.0.4.1 GUI probes on NixOS x86_64, both native Wayland and XWayland (`xcb`), using Python 3.14.8 and NumPy 2.5.3. Four standalone Qt6 regressions passed for RGB/RGBA buffer ownership, fractional history-cell hit testing and dialog flag transitions. Source archive layout, action/desktop descriptors, GPL license and absence of native vendor binaries were checked. Physical multi-monitor operation, aarch64 and Windows were not runtime-tested.
-
-Launcher-free deployment verification used the ordinary system Krita executable with isolated user data and no custom Python/data search environment. Private NumPy and linalg remained functional after removing the temporary import path; foreground input, popup/preview, shortcuts and shutdown passed. Installer upgrades, idempotency, registered GC roots and settings-preserving uninstall were exercised. The regression suite now has six passing cases, including refusal to partially install on conflicts and preservation of user replacements on uninstall.
-
-Ruff 0.17.2 reported no diagnostics and all checked files passed the formatting check. The six regressions passed after cleanup; 111 before/after comparisons preserved exact numerical, label and parser results. Keymap fallback and debug-log success/failure paths were also exercised. Ordinary Krita passed native Wayland and XWayland probes after cleanup, covering larger fonts, managed foreground-color conversion, English/Chinese keymap dialogs, settings menus, preview/popup lifecycle and process shutdown.
 
 ## Historical Windows package status
 
@@ -85,9 +92,9 @@ This historical package bundled NumPy 2.3.0 for its tested Krita 5.3 / Python 3.
 
 ## 中文说明
 
-馍馍拾色器 1.1.0：这是一个 Oklab/Oklch 拾色器，保留 HSV 色相环 + S/V 方块的顺手操作，同时用 Oklab L 精确锁定明度（可切换到 Krita 灰阶校样口径），彩度使用 Oklab C（默认相对彩度 C_rel，任何色相都可达）。支持 L/C/a/b 色条与数值框、弹出面板、预览浮层、历史颜色、可视化按键表和中英双语说明书。
+馍馍拾色器 2.0.0：面向 Krita 6 / Qt6 的重大版本，不再支持 Krita 5。保留 HSV 色相环 + S/V 方块、Oklab/灰阶明度与相对/绝对彩度、L/C/a/b 色条、历史颜色和自定义按键表；新增 Linux/Nix 一次安装后正常启动、Wayland 宿主内浮窗、分组留白布局与原生字体尺寸适配。
 
-1.1.0 更新要点：绝对彩度口径全面联动（蓝线、线簇、中键锁定，S=1 边界过点线精确过点）；数值行按字体实测自适应、文本始终完整、窄时左对齐；默认键表精简为色环 4 行 / 方块 3 行；新增全局「临时切换键」（默认 Shift，可改 Alt / Shift+Alt 等），按住即可悬停预览并在拖动全程使用另一彩度口径；绝对 C 线簇支持固定 18 档（默认）/ 按色相等分 9 档；关闭 Krita 时弹出面板跟着关闭（不再残留 `krita.exe`）。
+历史 1.1.0 更新要点：绝对彩度口径全面联动（蓝线、线簇、中键锁定，S=1 边界过点线精确过点）；数值行按字体实测自适应、文本始终完整、窄时左对齐；默认键表精简为色环 4 行 / 方块 3 行；新增全局「临时切换键」（默认 Shift，可改 Alt / Shift+Alt 等），按住即可悬停预览并在拖动全程使用另一彩度口径；绝对 C 线簇支持固定 18 档（默认）/ 按色相等分 9 档；关闭 Krita 时弹出面板跟着关闭（不再残留 `krita.exe`）。
 
 ### Krita 6 / Qt6 Nix 部署
 

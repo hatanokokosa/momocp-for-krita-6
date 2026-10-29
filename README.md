@@ -375,8 +375,9 @@ nix develop --command env QT_QPA_PLATFORM=offscreen python -m unittest discover 
 
 ## 链接
 
-- 仓库：<https://github.com/zmom0/momo-color-picker>
-- Releases：<https://github.com/zmom0/momo-color-picker/releases>
+- 仓库：<https://github.com/hatanokokosa/momocp-for-krita-6>
+- Releases：<https://github.com/hatanokokosa/momocp-for-krita-6/releases>
+- 上游项目：<https://github.com/zmom0/momo-color-picker>
 
 ## English
 
@@ -763,6 +764,7 @@ nix develop --command env QT_QPA_PLATFORM=offscreen python -m unittest discover 
 
 ### Links
 
-- Repository: <https://github.com/zmom0/momo-color-picker>
-- Releases: <https://github.com/zmom0/momo-color-picker/releases>
+- Repository: <https://github.com/hatanokokosa/momocp-for-krita-6>
+- Releases: <https://github.com/hatanokokosa/momocp-for-krita-6/releases>
+- Upstream: <https://github.com/zmom0/momo-color-picker>
 
