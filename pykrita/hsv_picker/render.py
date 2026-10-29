@@ -2,9 +2,9 @@
 """拾色器的位图渲染（numpy -> QImage）与几何换算。
 
 与 math_core 的分工：math_core 只算颜色数学，本模块把颜色数学的结果变成位图。
-三个 render_*_array 是纯 numpy、可在系统 Python 下单测；只有 qimage_from_* 需要 PyQt5，
+三个 render_*_array 是纯 numpy、可在系统 Python 下单测；只有 qimage_from_* 需要 PyQt6，
 所以 Qt 是延迟 import 的（便于数学/渲染逻辑离线回归）。
-Krita 5.3.3 = Qt5：QImage 用 Format_RGB888，取鼠标坐标用 event.localPos()。
+Krita 6 = Qt6：QImage 用 Format_RGB888。
 """
 
 import numpy as np
@@ -60,18 +60,18 @@ def render_ring_array(size, r_in_ratio, r_out_ratio, ss=2):
 
 def qimage_from_rgb(arr):
     """uint8 RGB (h,w,3) -> QImage（复制数据，避免 numpy 缓冲被回收）。"""
-    from PyQt5.QtGui import QImage
+    from PyQt6.QtGui import QImage
     arr = np.ascontiguousarray(arr, dtype=np.uint8)
     h, w, _ = arr.shape
-    return QImage(arr.data, w, h, w * 3, QImage.Format_RGB888).copy()
+    return QImage(arr.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
 
 
 def qimage_from_rgba(arr):
     """uint8 RGBA (h,w,4) -> QImage（复制数据）。"""
-    from PyQt5.QtGui import QImage
+    from PyQt6.QtGui import QImage
     arr = np.ascontiguousarray(arr, dtype=np.uint8)
     h, w, _ = arr.shape
-    return QImage(arr.data, w, h, w * 4, QImage.Format_RGBA8888).copy()
+    return QImage(arr.data, w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
 
 
 # ------------------------------------------------------------------ 纯几何（无 Qt，可离线单测）

@@ -5,9 +5,9 @@
 控件只负责画格子 + 点击回调。
 """
 
-from PyQt5.QtCore import QRectF, Qt
-from PyQt5.QtGui import QColor, QPainter
-from PyQt5.QtWidgets import QWidget
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QColor, QPainter
+from PyQt6.QtWidgets import QWidget
 
 try:                        # 插件内：包内相对导入
     from . import i18n
@@ -26,7 +26,7 @@ class HistoryWidget(QWidget):
         self.colors = []                 # ["#RRGGBB", ...]，按可见行数截断
         self._on_pick = on_pick
         self.setToolTip(i18n.t("历史颜色：单击取用", "History colors: click to use"))
-        self.setContextMenuPolicy(Qt.NoContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
     # ---- 行数随高度自适应 ----
     def rows(self):
@@ -49,7 +49,7 @@ class HistoryWidget(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, False)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         for i in range(self.rows()):
             rect = QRectF(0.0, i * CELL, CELL, CELL)
             if i >= len(self.colors):
@@ -59,10 +59,10 @@ class HistoryWidget(QWidget):
             p.fillRect(rect, QColor(self.colors[i]))
 
     def mousePressEvent(self, event):
-        if event.button() != Qt.LeftButton:
+        if event.button() != Qt.MouseButton.LeftButton:
             event.ignore()
             return
-        idx = int(event.localPos().y() // CELL)
+        idx = int(event.position().y() // CELL)
         if 0 <= idx < len(self.colors) and self._on_pick is not None:
             self._on_pick(self.colors[idx])
         event.accept()

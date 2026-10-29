@@ -12,8 +12,8 @@
 数据层（区域/输入/动作清单与默认值）在 `keymap_core`，本模块只做 Qt 界面。
 """
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QHBoxLayout,
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QHBoxLayout,
                              QHeaderView, QLabel, QMessageBox, QPushButton,
                              QTableWidget, QTableWidgetItem, QVBoxLayout)
 
@@ -98,13 +98,13 @@ class KeymapDialog(QDialog):
         root.addWidget(self.lbl_hint)
 
         self.table = QTableWidget(self)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.table.setFocusPolicy(Qt.NoFocus)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.table.setWordWrap(False)
         vheader = self.table.verticalHeader()
         vheader.setVisible(False)
-        vheader.setSectionResizeMode(QHeaderView.Fixed)
+        vheader.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         vheader.setDefaultSectionSize(ROW_H)
         vheader.setMinimumSectionSize(18)
         vheader.setMaximumSectionSize(ROW_H)      # 行高固定 26px（不被单元格控件撑大）
@@ -123,13 +123,13 @@ class KeymapDialog(QDialog):
 
         只增删 `WindowStaysOnTopHint`，不动其它标志；已打开时立即重显以生效。
         """
-        cur = int(self.windowFlags())
-        mask = int(Qt.WindowStaysOnTopHint)
+        cur = self.windowFlags()
+        mask = Qt.WindowType.WindowStaysOnTopHint
         want = (cur | mask) if on_top else (cur & ~mask)
         if want == cur:
             return
         was_visible = self.isVisible()
-        self.setWindowFlags(Qt.WindowFlags(want))
+        self.setWindowFlags(want)
         if was_visible:
             self.show()
             self.raise_()
@@ -162,9 +162,9 @@ class KeymapDialog(QDialog):
         self.table.clear()
         self.table.setColumnCount(3)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.setRowCount(len(specs))
         self.table.setHorizontalHeaderLabels(
             [i18n.t("区域", "Area"), i18n.t("输入", "Input"), i18n.t("动作", "Action")])
@@ -248,7 +248,7 @@ class KeymapDialog(QDialog):
 
     def _on_add(self, area):
         editor = InputEditor(self)
-        if editor.exec_() != QDialog.Accepted:
+        if editor.exec() != QDialog.DialogCode.Accepted:
             return
         mods, btn = editor.get_input()
         if kc.find_action(self.keymap, area, btn, mods) is not None:
@@ -260,7 +260,7 @@ class KeymapDialog(QDialog):
 
     def _on_edit_input(self, area, old_mods, old_btn):
         editor = InputEditor(self, mods=old_mods, btn=old_btn)
-        if editor.exec_() != QDialog.Accepted:
+        if editor.exec() != QDialog.DialogCode.Accepted:
             return
         mods, btn = editor.get_input()
         if (mods, btn) == (old_mods, old_btn):
@@ -280,8 +280,8 @@ class KeymapDialog(QDialog):
         ans = QMessageBox.question(
             self, i18n.t("恢复默认", "Restore defaults"),
             i18n.t("把所有区域的输入与动作恢复为默认值？", "Restore all areas to the default inputs and actions?"),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if ans == QMessageBox.Yes:
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if ans == QMessageBox.StandardButton.Yes:
             self.keymap = kc.default_keymap()
             self._notify()
             self._schedule_rebuild()

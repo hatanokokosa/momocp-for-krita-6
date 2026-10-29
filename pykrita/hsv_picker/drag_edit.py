@@ -10,8 +10,8 @@
   · 表中为 `none` -> 该组合**不拖动**，但仍保留普通单击编辑（R19）。
 """
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QLineEdit
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QLineEdit
 
 try:                        # 插件内：包内相对导入
     from . import i18n
@@ -23,8 +23,8 @@ except ImportError:         # 离线单测：直接把本目录加进 sys.path
 DRAG_THRESHOLD = 3
 
 # 键表不支持的 Qt 修饰位（Meta / Keypad / GroupSwitch 等）：出现即落回「无修饰」行
-_UNKNOWN_QT_MODS = (Qt.MetaModifier | Qt.KeypadModifier
-                    | getattr(Qt, "GroupSwitchModifier", 0))
+_UNKNOWN_QT_MODS = (Qt.KeyboardModifier.MetaModifier | Qt.KeyboardModifier.KeypadModifier
+                    | getattr(Qt.KeyboardModifier, "GroupSwitchModifier", Qt.KeyboardModifier(0)))
 
 
 class DragValueEdit(QLineEdit):
@@ -41,9 +41,9 @@ class DragValueEdit(QLineEdit):
         self._start_value = 0.0
         self._drag_gain = 1.0
         self._drag_enabled = False
-        self._drag_button = Qt.LeftButton
+        self._drag_button = Qt.MouseButton.LeftButton
         self.keymap = kmc.default_keymap()      # 自定义按键表（field 区域）
-        self.setCursor(Qt.SizeVerCursor)
+        self.setCursor(Qt.CursorShape.SizeVerCursor)
         self.setToolTip(i18n.t(
             "可直接输入；也可按住纵向拖动调值（不按=标准速，Ctrl=×2，Ctrl+Shift=×4 更快，Alt=×0.5 精调）",
             "Type a value, or drag vertically to adjust (plain=normal, Ctrl=×2, Ctrl+Shift=×4 faster, Alt=×0.5 fine)"))
@@ -54,16 +54,16 @@ class DragValueEdit(QLineEdit):
 
     @staticmethod
     def _btn_id(btn):
-        if btn == Qt.MiddleButton:
+        if btn == Qt.MouseButton.MiddleButton:
             return "middle"
-        if btn == Qt.RightButton:
+        if btn == Qt.MouseButton.RightButton:
             return "right"
         return "left"
 
     def _action_for(self, btn, mods):
-        mod = kmc.mods_from_bools(bool(mods & Qt.ShiftModifier),
-                                  bool(mods & Qt.ControlModifier),
-                                  bool(mods & Qt.AltModifier),
+        mod = kmc.mods_from_bools(bool(mods & Qt.KeyboardModifier.ShiftModifier),
+                                  bool(mods & Qt.KeyboardModifier.ControlModifier),
+                                  bool(mods & Qt.KeyboardModifier.AltModifier),
                                   bool(mods & _UNKNOWN_QT_MODS))
         return kmc.lookup(self.keymap, "field", self._btn_id(btn), mod)
 
@@ -82,20 +82,20 @@ class DragValueEdit(QLineEdit):
         return max(self._min, min(self._max, value))
 
     def mousePressEvent(self, event):
-        if event.button() in (Qt.LeftButton, Qt.MiddleButton, Qt.RightButton):
+        if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
             action = self._action_for(event.button(), event.modifiers())
             # R19：表中 none / text_only -> 不拖动，但仍把事件交给基类做单击编辑
             self._drag_enabled = action in kmc.FIELD_DRAG_GAIN
             self._drag_gain = kmc.FIELD_DRAG_GAIN.get(action, 1.0)
             self._drag_button = event.button()
-            self._press_y = event.y()
+            self._press_y = event.position().y()
             self._dragging = False
-            self.setFocus(Qt.MouseFocusReason)
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self._drag_enabled and (event.buttons() & self._drag_button):
-            dy = event.y() - self._press_y
+            dy = event.position().y() - self._press_y
             if not self._dragging and abs(dy) >= DRAG_THRESHOLD:
                 self._dragging = True
                 try:

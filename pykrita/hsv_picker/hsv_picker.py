@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""HSV 拾色器（Oklab 明度）— Krita 5.3.3 Docker 插件。
+"""HSV 拾色器（Oklab 明度）— Krita 6 Docker 插件。
 
 结构：
   HsvPickerDocker      —— 面板形态的拾色器（T-3 先做空面板 + 前景/背景色信号验证）
   HsvPickerExtension   —— 注册可自定义快捷键的动作，用于临时弹出拾色器
 
-目标环境：Krita 5.3.3 / Qt5 / PyQt5 5.15.x / Python 3.13（不要写 Qt6 API）。
+目标环境：Krita 6 / Qt6 / PyQt6；NumPy 由宿主 Python 环境提供。
 """
 
 import os
@@ -13,11 +13,11 @@ import tempfile
 import time
 import traceback
 
-from PyQt5.QtCore import QEvent, QObject, QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QColor
-from PyQt5.QtWidgets import (QAction, QActionGroup, QCheckBox, QHBoxLayout, QLabel,
-                             QLineEdit, QMenu, QMessageBox, QStyle, QToolButton,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtCore import QEvent, QObject, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QActionGroup, QColor, QGuiApplication
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLabel,
+                             QLineEdit, QMenu, QMessageBox, QStyle, QStyleOptionFrame, QToolButton,
+                             QSizeGrip, QVBoxLayout, QWidget)
 from krita import (DockWidget, DockWidgetFactory, DockWidgetFactoryBase,
                    Extension, Krita, ManagedColor)
 
@@ -108,7 +108,7 @@ def _alive(obj):
     if obj is None:
         return False
     try:
-        from PyQt5 import sip
+        from PyQt6 import sip
         return not sip.isdeleted(obj)
     except Exception:
         return True
@@ -201,6 +201,7 @@ class HsvPickerPanel(QWidget):
     def __init__(self, parent=None, dbg_name="panel", follow_active_view=False):
         super().__init__(parent)
         self.follow_active_view = bool(follow_active_view)   # 弹窗为 True：始终跟随当前活动视图
+        self._supports_global_top = not QGuiApplication.platformName().startswith("wayland")
         self.view_sinks = []                                 # 本面板视图变化时要同步的其它面板
         self.setMinimumWidth(300)
         self.setMinimumHeight(430)
@@ -394,7 +395,7 @@ class HsvPickerPanel(QWidget):
         # 3) 设置按钮（二级菜单；与数值行同一排、位于最左侧）
         self.btn_menu = QToolButton(self)
         self.btn_menu.setText(i18n.t("设置", "Settings"))
-        self.btn_menu.setPopupMode(QToolButton.InstantPopup)
+        self.btn_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.btn_menu.setToolTip(i18n.t("显示选项：明度/彩度线簇与过点线",
                                         "Display options: clusters and through-lines"))
         self.menu = QMenu(self.btn_menu)
@@ -583,13 +584,13 @@ class HsvPickerPanel(QWidget):
         self.act_on_top = QAction(i18n.t("弹出面板置顶", "Keep popup always on top"), self.menu)
         self.act_on_top.setCheckable(True)
         self.act_on_top.setToolTip(i18n.t(
-            "弹出面板保持在其他窗口之上；「点击弹出面板外时自动关闭」打开时本项无效（置灰）",
-            "Keep the popup above other windows; disabled while "
-            "\"Auto-close popup when clicking outside\" is on"))
+            "弹出面板保持在其他窗口之上；自动关闭开启时禁用。Wayland 使用 Krita 内浮窗，不支持桌面全局置顶。",
+            "Keep the popup above other windows; disabled with auto-close. "
+            "Wayland uses a child inside Krita, not desktop-global stacking."))
         self.act_on_top.blockSignals(True)
         self.act_on_top.setChecked(self.always_on_top)
         self.act_on_top.blockSignals(False)
-        self.act_on_top.setEnabled(not self.auto_close_popup)     # R17：自动关闭开 → 置顶项置灰（记忆值保留）
+        self.act_on_top.setEnabled(self._supports_global_top and not self.auto_close_popup)
         self.act_on_top.toggled.connect(self.set_always_on_top)
         self.menu.addAction(self.act_on_top)
         self.act_mouse_pos = QAction(i18n.t("弹出位置跟随鼠标", "Popup at mouse position"), self.menu)
@@ -677,7 +678,7 @@ class HsvPickerPanel(QWidget):
                      self._entry_width(self.edit_h, "-0.0000", 64, 8))
         self.edit_l = QLineEdit("0.5000", self)
         self.edit_l.setFixedWidth(_uni_w)
-        self.edit_l.setAlignment(Qt.AlignRight)
+        self.edit_l.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.edit_l.editingFinished.connect(self._on_entry_commit)
         self.lbl_l = self._strip_label(
             "L", i18n.t("Oklab 明度 L（0~1）", "Oklab lightness L (0-1)"))
@@ -693,7 +694,7 @@ class HsvPickerPanel(QWidget):
             on_press=self._on_strip_c_press, on_release=self._on_strip_release)
         self.edit_c = QLineEdit("1.0000", self)
         self.edit_c.setFixedWidth(_uni_w)
-        self.edit_c.setAlignment(Qt.AlignRight)
+        self.edit_c.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.edit_c.editingFinished.connect(self._on_entry_commit)
         self.lbl_c = self._strip_label(
             "C", i18n.t("相对彩度 C（0~1；1 = 该明度/色相下最饱和）",
@@ -713,7 +714,7 @@ class HsvPickerPanel(QWidget):
             on_release=self._on_strip_release)
         self.edit_a = QLineEdit("+0.0000", self)
         self.edit_a.setFixedWidth(_uni_w)
-        self.edit_a.setAlignment(Qt.AlignRight)
+        self.edit_a.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.edit_a.editingFinished.connect(self._on_entry_commit)
         self.lbl_a = self._strip_label(
             "a", i18n.t("Oklab a 分量（绿 ↔ 红方向）", "Oklab a component (green to red)"))
@@ -731,7 +732,7 @@ class HsvPickerPanel(QWidget):
             on_release=self._on_strip_release)
         self.edit_b = QLineEdit("+0.0000", self)
         self.edit_b.setFixedWidth(_uni_w)
-        self.edit_b.setAlignment(Qt.AlignRight)
+        self.edit_b.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.edit_b.editingFinished.connect(self._on_entry_commit)
         self.lbl_b = self._strip_label(
             "b", i18n.t("Oklab b 分量（蓝 ↔ 黄方向）", "Oklab b component (blue to yellow)"))
@@ -790,8 +791,8 @@ class HsvPickerPanel(QWidget):
 
     def event(self, ev):
         # 布局在每次尺寸变化后都要重算中间区（拾色器居中 + 历史列等高）
-        from PyQt5.QtCore import QEvent
-        if ev.type() in (QEvent.LayoutRequest, QEvent.Resize):
+        from PyQt6.QtCore import QEvent
+        if ev.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Resize):
             self._layout_picker()
         return super().event(ev)
 
@@ -819,6 +820,14 @@ class HsvPickerPanel(QWidget):
             if len(hist.colors) != hist.capacity():
                 self._save_history_capacity()
 
+    def _entry_decoration_width(self, edit):
+        """Measure the active Qt style, including Breeze's inner frame margins."""
+        option = QStyleOptionFrame()
+        edit.initStyleOption(option)
+        contents = edit.style().subElementRect(QStyle.SubElement.SE_LineEditContents, option, edit)
+        margins = edit.textMargins()
+        return edit.width() - contents.width() + margins.left() + margins.right() + 4
+
     def _entry_width(self, widget, sample, minimum, padding):
         """数值框宽度：按字体实测宽度 + 余量，取 max(最小宽, 实测宽+padding)。
 
@@ -829,7 +838,7 @@ class HsvPickerPanel(QWidget):
             advance = int(widget.fontMetrics().horizontalAdvance(sample))
         except Exception:
             return int(minimum)
-        return max(int(minimum), advance + int(padding))
+        return max(int(minimum), advance + self._entry_decoration_width(widget) + int(padding))
 
     def _entry_widgets(self):
         """数值行四个框（H/S/V/HEX）：布局与焦点处理共用。"""
@@ -905,12 +914,11 @@ class HsvPickerPanel(QWidget):
                 continue
             try:
                 fm = edit.fontMetrics()
-                frame = edit.style().pixelMetric(QStyle.PM_DefaultFrameWidth)
-                need = fm.horizontalAdvance(edit.text()) + 2 * frame + 4
-                want = Qt.AlignLeft if int(edit.width()) < int(need) else Qt.AlignRight
-                if (edit.alignment() & Qt.AlignHorizontal_Mask) != want:
+                need = fm.horizontalAdvance(edit.text()) + self._entry_decoration_width(edit)
+                want = Qt.AlignmentFlag.AlignLeft if int(edit.width()) < int(need) else Qt.AlignmentFlag.AlignRight
+                if (edit.alignment() & Qt.AlignmentFlag.AlignHorizontal_Mask) != want:
                     edit.setAlignment(want)
-                if want == Qt.AlignLeft and not edit.hasFocus():
+                if want == Qt.AlignmentFlag.AlignLeft and not edit.hasFocus():
                     edit.setCursorPosition(0)   # 不聚焦时把显示停在文本开头
             except Exception:
                 pass
@@ -926,7 +934,7 @@ class HsvPickerPanel(QWidget):
         else:
             edit = cls(text, self)
         edit.setFixedWidth(width)
-        edit.setAlignment(Qt.AlignRight)
+        edit.setAlignment(Qt.AlignmentFlag.AlignRight)
         edit.editingFinished.connect(self._on_entry_commit)
         return edit
 
@@ -1866,8 +1874,10 @@ class HsvPickerPanel(QWidget):
         """预览浮层对象（惰性创建；独立小窗，不抢焦点、不吃鼠标）。"""
         ov = getattr(self, "_overlay", None)
         if ov is None or not _alive(ov):
-            ov = preview_overlay.PreviewOverlay()
+            ov = preview_overlay.PreviewOverlay(self.window())
             self._overlay = ov
+        elif ov.parentWidget() is not self.window():
+            ov.setParent(self.window(), ov.windowFlags())
         return ov
 
     def _preview_begin(self):
@@ -1892,15 +1902,14 @@ class HsvPickerPanel(QWidget):
         这样浮层贴右/左/下/上都落在面板之外，**不会压住面板自身（含右侧历史列）**；
         同时仍然跟着面板 / 拾色器一起动（150ms 重锚定）。
 
-        拾色器不可见（面板隐藏 / 弹窗关闭）、已销毁、宽高为 0 时返回 None（调用方会收起浮层）。
-        面板从未显示过（离屏初始化 / 离屏测试）时不做可见性判定。
+        隐藏、被宿主内其它控件完全遮挡、已销毁或宽度为 0 时返回 None。
         """
         picker = getattr(self, "picker", None)
         if picker is None or not _alive(picker) or picker.width() <= 0 or self.width() <= 0:
             return None
         try:
-            from PyQt5.QtCore import QPoint, QRect
-            if not picker.isVisible() and getattr(self, "_was_shown", False):
+            from PyQt6.QtCore import QPoint, QRect
+            if not picker.isVisible() or picker.visibleRegion().isEmpty():
                 return None
             picker_tl = picker.mapToGlobal(QPoint(0, 0))
             panel_tl = self.mapToGlobal(QPoint(0, 0))
@@ -1969,19 +1978,20 @@ class HsvPickerPanel(QWidget):
         if not self._preview_enabled():
             self._preview_hide_now()
             return None
+        anchor = self._preview_anchor()
+        if anchor is None:
+            self._preview_hide_now()
+            return None
         if self._preview_last_rgb is _UNSET or self._preview_older_rgb is _UNSET:
             self._preview_begin()      # 兜底：没走过 _preview_begin 的调用
         if start_countdown is None:
             start_countdown = not self._interacting()
         try:
             ov = self.preview_overlay()
-            was_visible = ov.isVisible()
+            if not ov.isVisible():
+                ov.show_near(anchor)
             ov.show_colors(self.picker_rgb(), self._preview_older_rgb,
                            self._preview_last_rgb)
-            if not was_visible:
-                anchor = self._preview_anchor()
-                if anchor is not None:
-                    ov.show_near(anchor)
             if self.preview_mode == "always":
                 ov.cancel_hide()
             elif start_countdown:
@@ -2089,7 +2099,7 @@ class HsvPickerPanel(QWidget):
     def _text_input_has_focus(self):
         """文本输入框有焦点时暂停悬停预览（Shift 打大写不闪烁）。"""
         try:
-            from PyQt5.QtWidgets import QAbstractSpinBox, QApplication, QLineEdit
+            from PyQt6.QtWidgets import QAbstractSpinBox, QApplication, QLineEdit
             w = QApplication.focusWidget()
             return isinstance(w, (QLineEdit, QAbstractSpinBox))
         except Exception:
@@ -2098,8 +2108,8 @@ class HsvPickerPanel(QWidget):
     def _cursor_inside_panel(self):
         """鼠标命中的控件是否属于本面板：widgetAt + parentWidget 父链；主面板与弹窗各自判定。"""
         try:
-            from PyQt5.QtGui import QCursor
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtGui import QCursor
+            from PyQt6.QtWidgets import QApplication
             w = QApplication.widgetAt(QCursor.pos())
             while w is not None:
                 if w is self:
@@ -2135,13 +2145,13 @@ class HsvPickerPanel(QWidget):
     def _on_app_key_event(self, event):
         """KeyPress/KeyRelease -> 显式维护 Shift/Ctrl/Alt 状态，松开立刻清位。"""
         try:
-            down = (event.type() == QEvent.KeyPress)
+            down = (event.type() == QEvent.Type.KeyPress)
             key = event.key()
-            if key == Qt.Key_Shift:
+            if key == Qt.Key.Key_Shift:
                 self._kb_shift = down
-            elif key == Qt.Key_Control:
+            elif key == Qt.Key.Key_Control:
                 self._kb_ctrl = down
-            elif key == Qt.Key_Alt:
+            elif key == Qt.Key.Key_Alt:
                 self._kb_alt = down
         except Exception:
             pass
@@ -2152,29 +2162,29 @@ class HsvPickerPanel(QWidget):
             mods = event.modifiers()
         except Exception:
             return
-        self._kb_shift = bool(mods & Qt.ShiftModifier)
-        self._kb_ctrl = bool(mods & Qt.ControlModifier)
-        self._kb_alt = bool(mods & Qt.AltModifier)
+        self._kb_shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        self._kb_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        self._kb_alt = bool(mods & Qt.KeyboardModifier.AltModifier)
 
     def _sync_kb_from_app(self):
         """窗口重新激活 / 重新显示时按 Qt 当前修饰键状态校准一次（不在 KeyPress 过滤器里用）。"""
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app is None:
                 return
             mods = app.keyboardModifiers()
         except Exception:
             return
-        self._kb_shift = bool(mods & Qt.ShiftModifier)
-        self._kb_ctrl = bool(mods & Qt.ControlModifier)
-        self._kb_alt = bool(mods & Qt.AltModifier)
+        self._kb_shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        self._kb_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        self._kb_alt = bool(mods & Qt.KeyboardModifier.AltModifier)
 
     def _install_hover_filter(self):
         """安装应用级事件过滤器（按键 / 鼠标 / 焦点 / 应用激活 -> 刷新悬停预览）。"""
         if getattr(self, "_hover_filter_installed", False):
             return
-        from PyQt5.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication
         app = QApplication.instance()
         if app is None:
             return
@@ -2186,7 +2196,7 @@ class HsvPickerPanel(QWidget):
         if not getattr(self, "_hover_filter_installed", False):
             return
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app is not None:
                 app.removeEventFilter(self)
@@ -2198,23 +2208,23 @@ class HsvPickerPanel(QWidget):
         """应用级过滤器：刷新切换键悬停预览，不消费事件。"""
         try:
             et = event.type()
-            if et in (QEvent.KeyPress, QEvent.KeyRelease):
+            if et in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
                 self._on_app_key_event(event)
                 self._refresh_panel_hover()
-            elif et in (QEvent.MouseMove, QEvent.MouseButtonPress,
-                        QEvent.MouseButtonRelease, QEvent.Wheel):
+            elif et in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress,
+                        QEvent.Type.MouseButtonRelease, QEvent.Type.Wheel):
                 self._sync_kb_from_mouse(event)
                 self._refresh_panel_hover()
-            elif et in (QEvent.FocusIn, QEvent.FocusOut, QEvent.Enter, QEvent.Leave):
+            elif et in (QEvent.Type.FocusIn, QEvent.Type.FocusOut, QEvent.Type.Enter, QEvent.Type.Leave):
                 self._refresh_panel_hover()
-            elif et in (QEvent.ApplicationDeactivate,
-                        getattr(QEvent, "WindowDeactivate", None)):
+            elif et in (QEvent.Type.ApplicationDeactivate,
+                        QEvent.Type.WindowDeactivate):
                 self._kb_clear()
-                if et == QEvent.ApplicationDeactivate:
+                if et == QEvent.Type.ApplicationDeactivate:
                     self._hover_suspended = True
                 self._update_hover_temp()
-            elif et in (QEvent.ApplicationActivate,
-                        getattr(QEvent, "WindowActivate", None)):
+            elif et in (QEvent.Type.ApplicationActivate,
+                        QEvent.Type.WindowActivate):
                 self._hover_suspended = False
                 self._sync_kb_from_app()   # 激活时校准一次；随后按键/鼠标事件继续维护
                 self._refresh_panel_hover()
@@ -2515,7 +2525,7 @@ class HsvPickerPanel(QWidget):
 
         与弹窗窗口标志同口径；「按键功能…」对话框打开时按此继承置顶。
         """
-        return bool(getattr(self, "always_on_top", True)
+        return bool(self._supports_global_top and getattr(self, "always_on_top", True)
                     and not getattr(self, "auto_close_popup", True))
 
     def _keymap_parent(self):
@@ -2570,7 +2580,7 @@ class HsvPickerPanel(QWidget):
             try:
                 visible = bool(host.isVisible())
                 minimized = bool(host.isMinimized()) or bool(
-                    int(host.windowState()) & int(Qt.WindowMinimized))
+                    host.windowState() & Qt.WindowState.WindowMinimized)
             except Exception:
                 visible, minimized = True, False
         if minimized:
@@ -2703,7 +2713,7 @@ class HsvPickerPanel(QWidget):
     def show_about_dialog(self):
         """设置菜单「关于馍馍拾色器」：slogan / 版本 / 许可 / 第三方依赖。"""
         box = QMessageBox(self)
-        box.setIcon(QMessageBox.Information)
+        box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle(i18n.t("关于馍馍拾色器", "About Momo Color Picker"))
         box.setText(i18n.t(
             "馍馍拾色器：更适合HSV宝宝的OKLAB/OKLCH拾色器",
@@ -2712,8 +2722,8 @@ class HsvPickerPanel(QWidget):
             "版本：%s\n许可：GPL-3.0-or-later\n第三方：numpy（BSD-3-Clause）",
             "Version: %s\nLicense: GPL-3.0-or-later\nThird-party: numpy (BSD-3-Clause)")
             % __version__)
-        box.setStandardButtons(QMessageBox.Ok)
-        box.exec_()
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     def _dbg_session(self):
         """写一条诊断日志会话头（版本 / 面板 / 当前颜色）。"""
@@ -2768,7 +2778,7 @@ class HsvPickerPanel(QWidget):
                 self.act_auto_close.setChecked(self.auto_close_popup)
                 self.act_auto_close.blockSignals(False)
         if _alive(getattr(self, "act_on_top", None)):
-            self.act_on_top.setEnabled(not self.auto_close_popup)
+            self.act_on_top.setEnabled(self._supports_global_top and not self.auto_close_popup)
         hook = getattr(self, "on_top_hook", None)
         if hook is not None:
             try:
@@ -2799,7 +2809,7 @@ class HsvPickerPanel(QWidget):
                 self.act_on_top.blockSignals(True)
                 self.act_on_top.setChecked(self.always_on_top)
                 self.act_on_top.blockSignals(False)
-            self.act_on_top.setEnabled(not self.auto_close_popup)
+            self.act_on_top.setEnabled(self._supports_global_top and not self.auto_close_popup)
         hook = getattr(self, "on_top_hook", None)
         if hook is not None:
             try:
@@ -2898,7 +2908,7 @@ class HsvPickerDocker(DockWidget):
     def changeEvent(self, event):
         super().changeEvent(event)
         try:
-            if event.type() == QEvent.WindowStateChange:
+            if event.type() == QEvent.Type.WindowStateChange:
                 self.panel._sync_keymap_dialog_visibility()
         except Exception:
             pass
@@ -2917,9 +2927,9 @@ class _QuitCloseFilter(QObject):
 
     def eventFilter(self, obj, event):
         try:
-            if event.type() != QEvent.Close:
+            if event.type() != QEvent.Type.Close:
                 return False
-            from PyQt5.QtWidgets import QMainWindow
+            from PyQt6.QtWidgets import QMainWindow
             if not isinstance(obj, QMainWindow):
                 return False
             if not obj.isVisible():
@@ -2950,7 +2960,6 @@ class HsvPickerExtension(Extension):
         if not action.shortcut():
             action.setShortcut(DEFAULT_POPUP_SHORTCUT)
         action.triggered.connect(self.toggle_popup)
-        self._toggle_sequence = action.shortcut().toString() or DEFAULT_POPUP_SHORTCUT
         self._install_app_shortcut_filter()
         self._install_quit_hooks()          # T-54：每个主窗口都会调一次，内部只挂一次
         _log("createActions 完成 shortcut=%r" % (action.shortcut(),))
@@ -2960,7 +2969,7 @@ class HsvPickerExtension(Extension):
         if getattr(self, "_app_filter_installed", False):
             return
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app is None:
                 return
@@ -2970,8 +2979,9 @@ class HsvPickerExtension(Extension):
             pass
 
     def _shortcut_sequence(self):
-        from PyQt5.QtGui import QKeySequence
-        return QKeySequence(getattr(self, "_toggle_sequence", None) or DEFAULT_POPUP_SHORTCUT)
+        from PyQt6.QtGui import QKeySequence
+        action = Krita.instance().action(ACTION_POPUP_ID)
+        return action.shortcut() if action is not None else QKeySequence(DEFAULT_POPUP_SHORTCUT)
 
     def eventFilter(self, obj, event):
         """接管 Shift+B：弹窗可见→关闭，不可见→弹出。
@@ -2980,18 +2990,18 @@ class HsvPickerExtension(Extension):
         弹窗自身的 HEX / 数值框内输入大写 B（Shift+B）不会被误当成弹窗开关。
         """
         try:
-            from PyQt5.QtCore import QEvent
-            from PyQt5.QtGui import QKeySequence
-            from PyQt5.QtWidgets import QAbstractSpinBox, QApplication, QLineEdit
+            from PyQt6.QtCore import QEvent
+            from PyQt6.QtGui import QKeySequence
+            from PyQt6.QtWidgets import QAbstractSpinBox, QApplication, QLineEdit
             et = event.type()
-            if et == QEvent.KeyPress:
+            if et == QEvent.Type.KeyPress:
                 if event.isAutoRepeat():
                     return False
-                combo = QKeySequence(event.key() | int(event.modifiers()))
-                if not self._shortcut_sequence().matches(combo):
+                combo = QKeySequence(event.keyCombination())
+                if self._shortcut_sequence().matches(combo) != QKeySequence.SequenceMatch.ExactMatch:
                     return False
-            elif et == QEvent.Shortcut:
-                if event.key() != self._shortcut_sequence()[0]:
+            elif et == QEvent.Type.Shortcut:
+                if event.key() != self._shortcut_sequence():
                     return False
             else:
                 return False
@@ -3028,7 +3038,7 @@ class HsvPickerExtension(Extension):
         except Exception:
             pass
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app is not None:
                 app.aboutToQuit.connect(self._close_popup_for_quit)
@@ -3036,7 +3046,7 @@ class HsvPickerExtension(Extension):
         except Exception:
             pass
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app is not None:
                 self._quit_filter = _QuitCloseFilter(self)
@@ -3064,7 +3074,7 @@ class HsvPickerExtension(Extension):
         flt = getattr(self, "_quit_filter", None)
         if flt is not None:
             try:
-                from PyQt5.QtWidgets import QApplication
+                from PyQt6.QtWidgets import QApplication
                 app = QApplication.instance()
                 if app is not None:
                     app.removeEventFilter(flt)
@@ -3075,7 +3085,7 @@ class HsvPickerExtension(Extension):
     def _is_last_visible_main_window(self, window):
         """除 window 外没有其它可见 QMainWindow => 它是最后一个主窗口。"""
         try:
-            from PyQt5.QtWidgets import QApplication, QMainWindow
+            from PyQt6.QtWidgets import QApplication, QMainWindow
             for w in QApplication.topLevelWidgets():
                 if w is window:
                     continue
@@ -3112,9 +3122,9 @@ class HsvPickerExtension(Extension):
         """快捷键触发：显示/隐藏临时弹出的拾色器窗口（不消抖，每次按键都切换）。"""
         self._install_app_shortcut_filter()      # 兜底：确保应用级快捷键接管已安装
         try:
-            if self._popup is None:
+            if not _alive(self._popup):
                 partner = getattr(self, "_docker", None)
-                self._popup = HsvPickerPopup(partner.panel if partner is not None else None)
+                self._popup = HsvPickerPopup(partner.panel if _alive(partner) else None)
             self._popup.toggle()
         except Exception:
             _log("toggle_popup 失败:\n%s" % traceback.format_exc())
@@ -3126,10 +3136,15 @@ class HsvPickerPopup(QWidget):
     """快捷键临时弹出的拾色器窗口（与 Docker 面板共享颜色/历史/显示开关）。"""
 
     def __init__(self, partner=None):
-        super().__init__(None, Qt.Window)
-        # T-54：独立顶层弹窗不参与 Qt「最后一个窗口关闭 => 退出」判定，
-        # 否则关掉 Krita 主窗口后 krita.exe 会因弹窗仍在而残留。
-        self.setAttribute(Qt.WA_QuitOnClose, False)
+        window = Krita.instance().activeWindow()
+        host = window.qwindow() if window is not None else None
+        embedded = QGuiApplication.platformName().startswith("wayland") and host is not None
+        super().__init__(host, Qt.WindowType.SubWindow if embedded else Qt.WindowType.Tool)
+        # Wayland cannot position ordinary top-level windows. Keep the picker
+        # in Krita's surface, sharing its coordinate space and focus.
+        self._embedded = embedded
+        self.setAutoFillBackground(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setWindowTitle(i18n.t("馍馍拾色器", "Momo Color Picker"))
         self._partner = partner
         self._changing_flags = False
@@ -3141,6 +3156,13 @@ class HsvPickerPopup(QWidget):
         self.panel = HsvPickerPanel(self, dbg_name="popup", follow_active_view=True)
         self.panel.dialog_host = self        # R18：从弹窗打开「按键功能」时以弹窗为 parent
         layout.addWidget(self.panel)
+        self._size_grip = QSizeGrip(self)
+        self._size_grip.setVisible(self._embedded)
+        if self._embedded:
+            grip_row = QHBoxLayout()
+            grip_row.addStretch(1)
+            grip_row.addWidget(self._size_grip)
+            layout.addLayout(grip_row)
         if partner is not None:
             # 颜色双向同步
             self.panel.color_synced.connect(partner.apply_external)
@@ -3175,19 +3197,18 @@ class HsvPickerPopup(QWidget):
         self._apply_window_flags()
 
     def _apply_window_flags(self):
-        """按「弹出面板置顶」设置应用窗口标志：独立顶层窗口（Windows 任务栏可见）+ 可选置顶。
-
-        R17：置顶记忆自己的值；但「点击弹出面板外时自动关闭」开着时本项无意义（置灰），
-        故实际标志 = 记忆值 AND not 自动关闭。
-        """
+        """Wayland 使用宿主内浮窗；其它后端使用关联宿主的工具窗。"""
+        if self._embedded:
+            return
         try:
+            flags = self.windowFlags()
+            top = Qt.WindowType.WindowStaysOnTopHint
+            wanted = (flags | top) if self.panel.effective_top() else (flags & ~top)
+            if wanted == flags:
+                return
             was_visible = self.isVisible()
             self._changing_flags = True
-            flags = Qt.Window
-            effective_top = self.panel.effective_top()
-            if effective_top:
-                flags |= Qt.WindowStaysOnTopHint
-            self.setWindowFlags(flags)
+            self.setWindowFlags(wanted)
             if was_visible:
                 self.show()
                 self.raise_()
@@ -3198,9 +3219,12 @@ class HsvPickerPopup(QWidget):
 
     def _screen_available_size(self):
         """当前屏幕可用区（光标所在屏优先，取不到用主屏）；无屏幕信息返回 None。"""
+        if self._embedded:
+            size = self.parentWidget().size()
+            return size.width(), size.height()
         try:
-            from PyQt5.QtGui import QCursor, QGuiApplication
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtGui import QCursor, QGuiApplication
+            from PyQt6.QtWidgets import QApplication
             screen = QGuiApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
             if screen is None:
                 return None
@@ -3285,21 +3309,43 @@ class HsvPickerPopup(QWidget):
             self._hide_reason = "toggle"
             self.hide()
         else:
+            window = Krita.instance().activeWindow()
+            host = window.qwindow() if window is not None else None
+            if host is not None and self.parentWidget() is not host:
+                size = self.size()
+                self.setParent(host, Qt.WindowType.SubWindow if self._embedded else Qt.WindowType.Tool)
+                self.resize(size)
+            self._return_focus = QApplication.focusWidget()
             self._apply_window_flags()
             if getattr(self.panel, "popup_at_mouse", True):
                 self._place_popup()
             self._install_outside_filter()
             self.show()
             self.raise_()
-            self.activateWindow()      # 聚焦到弹窗：再次按快捷键时由弹窗侧快捷键隐藏
-            self.setFocus(Qt.OtherFocusReason)
+            if not self._embedded:
+                self.activateWindow()
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _place_popup(self):
         """按「弹出位置跟随鼠标」放置：以鼠标为中心；超出 Krita 主窗口时贴边夹回窗口内。"""
         try:
-            from PyQt5.QtGui import QCursor, QGuiApplication
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtGui import QCursor, QGuiApplication
+            from PyQt6.QtWidgets import QApplication
             cursor = QCursor.pos()
+            if self._embedded:
+                host = self.parentWidget()
+                self._programmatic_resize = True
+                try:
+                    self.setMaximumSize(host.size())
+                    self.resize(*self._clamp_size_to_screen(self.width(), self.height()))
+                finally:
+                    self._programmatic_resize = False
+                cursor = host.mapFromGlobal(cursor)
+                rect = host.rect()
+                x, y = popup_position((cursor.x(), cursor.y()), (self.width(), self.height()),
+                                      (rect.left(), rect.top(), rect.right(), rect.bottom()))
+                self.move(x, y)
+                return
             screen = QGuiApplication.screenAt(cursor) or QApplication.primaryScreen()
             if screen is None:
                 return
@@ -3333,7 +3379,7 @@ class HsvPickerPopup(QWidget):
         if getattr(self, "_outside_filter", False):
             return
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             QApplication.instance().installEventFilter(self)
             self._outside_filter = True
         except Exception:
@@ -3343,7 +3389,7 @@ class HsvPickerPopup(QWidget):
         if not getattr(self, "_outside_filter", False):
             return
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             QApplication.instance().removeEventFilter(self)
         except Exception:
             pass
@@ -3364,7 +3410,7 @@ class HsvPickerPopup(QWidget):
     def _is_inside_popup(self, gpos):
         """gpos 命中的控件是否属于本弹窗（含「设置」菜单等子窗口）。"""
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             return self._obj_is_ours(QApplication.widgetAt(gpos))
         except Exception:
             pass
@@ -3373,13 +3419,28 @@ class HsvPickerPopup(QWidget):
     def eventFilter(self, obj, event):
         """点窗口外：按设置决定是否隐藏；隐藏时**吃掉这次点击**（画布不受影响）。"""
         try:
-            from PyQt5.QtCore import QEvent
-            if event.type() == QEvent.MouseButtonPress and self.isVisible():
+            from PyQt6.QtCore import QEvent
+            if self.isVisible() and self._embedded and obj is self.parentWidget():
+                if event.type() in (QEvent.Type.Hide, QEvent.Type.Close):
+                    self.hide()
+                elif event.type() == QEvent.Type.Resize:
+                    host = self.parentWidget()
+                    self._programmatic_resize = True
+                    try:
+                        self.setMaximumSize(host.size())
+                        self.move(max(0, min(self.x(), host.width() - self.width())),
+                                  max(0, min(self.y(), host.height() - self.height())))
+                    finally:
+                        self._programmatic_resize = False
+            if (self._embedded and event.type() == QEvent.Type.ApplicationDeactivate
+                    and self.isVisible() and self._auto_close_enabled()):
+                self.hide()
+            if event.type() == QEvent.Type.MouseButtonPress and self.isVisible():
                 # 事件目标是本弹窗或其后代（含设置菜单）：算作内部点击
                 if obj is self or self._obj_is_ours(obj):
                     return super().eventFilter(obj, event)
-                gpos = event.globalPos() if hasattr(event, "globalPos") else None
-                if gpos is not None and not self.frameGeometry().contains(gpos) \
+                gpos = event.globalPosition().toPoint()
+                if not self.rect().contains(self.mapFromGlobal(gpos)) \
                         and not self._is_inside_popup(gpos):
                     if not self._auto_close_enabled():
                         return super().eventFilter(obj, event)    # 设置项关闭：不隐藏、不消费
@@ -3407,7 +3468,7 @@ class HsvPickerPopup(QWidget):
         if getattr(self, "_changing_flags", False):
             return
         try:
-            if event.type() == QEvent.WindowStateChange:
+            if event.type() == QEvent.Type.WindowStateChange:
                 self.panel._sync_keymap_dialog_visibility()
         except Exception:
             pass
@@ -3429,6 +3490,9 @@ class HsvPickerPopup(QWidget):
         except (RuntimeError, AttributeError):
             pass
         super().hideEvent(event)
+        previous = getattr(self, "_return_focus", None)
+        if _alive(previous) and previous.isVisible():
+            previous.setFocus(Qt.FocusReason.OtherFocusReason)
         try:
             self.panel._sync_keymap_dialog_visibility()      # R24：宿主隐藏 -> 关闭对话框
         except Exception:

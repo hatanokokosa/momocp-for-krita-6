@@ -2,7 +2,7 @@
 """诊断日志模式（T-16）：把拾色器交互与内部状态写入文件，供离线排查。
 
 约束：
-- 只用标准库，不 import krita / PyQt5（可用系统 Python 单测）。
+- 只用标准库，不 import krita / PyQt6（可用系统 Python 单测）。
 - 默认关闭；关闭时所有公开接口只做一次 bool 判断，不产生可感知开销。
 - 任何写盘异常都不得影响插件功能：捕获后自动停用。
 - 单文件超过 _MAX_BYTES 时轮转为 "<path>.1"（只保留一份轮转）。
@@ -26,11 +26,14 @@ _SESSION_STARTED = False  # 本进程是否已开启过日志（第一次开启�
 
 
 def default_path():
-    """默认日志路径；HSV_PICKER_DEBUG_LOG 优先，其次 %APPDATA%/krita。"""
+    """日志路径：显式覆盖、Windows APPDATA 或 Linux XDG_STATE_HOME。"""
     override = os.environ.get("HSV_PICKER_DEBUG_LOG")
     if override:
         return override
-    base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     return os.path.join(base, "krita", "hsv_picker_debug.log")
 
 

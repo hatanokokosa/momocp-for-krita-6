@@ -3,7 +3,7 @@
 
 方位：0° 红在 9 点钟，色相顺时针递增（不要改）。
 几何：方块半边长 = 短边 × 0.286，环内半径 = 方块半边长 × √2（方块四角顶内圈）。
-Qt5：鼠标坐标用 event.localPos()。
+Qt6：鼠标坐标使用 event.position()。
 
 交互（动作由**自定义按键表** keymap_core + 设置「临时切换键」决定；默认值 T-53）：
   · 环上：左 / 中 / 右键 = 绝对角度转色相 + 锁明度 + 锁**当前口径** C；
@@ -22,9 +22,9 @@ Qt5：鼠标坐标用 event.localPos()。
 import math
 
 import numpy as np
-from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
-from PyQt5.QtWidgets import QWidget
+from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
+from PyQt6.QtWidgets import QWidget
 
 try:                        # 插件内：包内相对导入
     from . import debug_log as dlog
@@ -42,8 +42,8 @@ CLUSTER_HUE_BUCKET = 15.0  # 线簇缓存的色相分桶（度）
 CLUSTER_STEP = 0.1         # 两族簇的步进
 
 # 键表不支持的 Qt 修饰位（Meta / Keypad / GroupSwitch 等）：出现即落回「无修饰」行
-_UNKNOWN_QT_MODS = (Qt.MetaModifier | Qt.KeypadModifier
-                    | getattr(Qt, "GroupSwitchModifier", 0))
+_UNKNOWN_QT_MODS = (Qt.KeyboardModifier.MetaModifier | Qt.KeyboardModifier.KeypadModifier
+                    | getattr(Qt.KeyboardModifier, "GroupSwitchModifier", Qt.KeyboardModifier(0)))
 
 
 def cluster_pen_width(target):
@@ -75,7 +75,7 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         super().__init__(parent)
         self.setMinimumSize(180, 180)
         self.setMouseTracking(False)
-        self.setContextMenuPolicy(Qt.NoContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self._last_heavy = 0.0          # 60Hz 节流用
         self._through_cache = None      # 过点线缓存（同一颜色重复绘制不重算）
         self._through_key = None
@@ -336,7 +336,7 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
             import os
             path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "ring.png")
             if os.path.isfile(path):
-                from PyQt5.QtGui import QImage
+                from PyQt6.QtGui import QImage
                 img = QImage(path)
         except Exception:
             img = None
@@ -344,7 +344,7 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
             img = rd.qimage_from_rgba(rd.render_ring_array(
                 720, g["r_in"] / (side / 2.0), g["r_out"] / (side / 2.0), ss=1))
         self._ring_cache = QPixmap.fromImage(img).scaled(
-            side, side, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            side, side, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self._ring_cache_size = side
         return self._ring_cache
 
@@ -606,9 +606,9 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
 
     @staticmethod
     def _btn_id(btn):
-        if btn == Qt.MiddleButton:
+        if btn == Qt.MouseButton.MiddleButton:
             return "middle"
-        if btn == Qt.RightButton:
+        if btn == Qt.MouseButton.RightButton:
             return "right"
         return "left"
 
@@ -620,9 +620,9 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         3) 其余按 lookup 的落回顺序（含该鼠标键的无修饰行）。
         """
         btn_id = self._btn_id(btn)
-        mod = kmc.mods_from_bools(bool(mods & Qt.ShiftModifier),
-                                  bool(mods & Qt.ControlModifier),
-                                  bool(mods & Qt.AltModifier),
+        mod = kmc.mods_from_bools(bool(mods & Qt.KeyboardModifier.ShiftModifier),
+                                  bool(mods & Qt.KeyboardModifier.ControlModifier),
+                                  bool(mods & Qt.KeyboardModifier.AltModifier),
                                   bool(mods & _UNKNOWN_QT_MODS))
         if mod is not None:
             act = kmc.find_action(self.keymap, area, btn_id, mod)
@@ -792,12 +792,12 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
 
     def _paint_clusters(self, p, g):
         data = self._clusters()
-        p.setBrush(Qt.NoBrush)
+        p.setBrush(Qt.BrushStyle.NoBrush)
         for family, base in (("iso", (150, 190, 225, 160)), ("crel", (195, 170, 120, 160))):
             for _tgt, ss, vv in data[family]:
                 for rgba, width in cluster_line_styles(base, _tgt):
                     pen = QPen(QColor(*rgba), width)
-                    pen.setStyle(Qt.DashLine)
+                    pen.setStyle(Qt.PenStyle.DashLine)
                     p.setPen(pen)
                     self._polyline(p, *self._to_px(ss, vv, g))
 
@@ -811,14 +811,14 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
                 continue
             xs, ys = self._to_px(line[0], line[1], g)
             pen = QPen(color, 1.8)
-            pen.setStyle(Qt.DashLine)
+            pen.setStyle(Qt.PenStyle.DashLine)
             p.setPen(pen)
             self._polyline(p, xs, ys)
 
     def paintEvent(self, event):
         g = self._geometry()
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         side = min(self.width(), self.height())
         p.drawPixmap(int(round(g["cx"] - side / 2.0)),
                      int(round(g["cy"] - side / 2.0)), self._ring_pixmap())
@@ -827,12 +827,12 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         if self.show_unreachable:
             up = self.unreachable_path(g)
             if up is not None:
-                p.setPen(Qt.NoPen)
+                p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QBrush(QColor(58, 58, 58, 77)))       # 30% 灰底
                 p.drawPath(up)
-                p.setBrush(QBrush(QColor(128, 128, 128, 170), Qt.BDiagPattern))
+                p.setBrush(QBrush(QColor(128, 128, 128, 170), Qt.BrushStyle.BDiagPattern))
                 p.drawPath(up)
-                p.setBrush(Qt.NoBrush)
+                p.setBrush(Qt.BrushStyle.NoBrush)
         sq = self._square_pixmap()
         x0, y0 = int(round(g["sq"][0])), int(round(g["sq"][1]))
         p.drawPixmap(x0, y0, sq)
@@ -875,16 +875,16 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
-        pos = event.localPos()
+        pos = event.position()
         area = self._hit(pos)
         if area is None:
             event.ignore()
             return
         btn = event.button()
-        if btn not in (Qt.LeftButton, Qt.MiddleButton, Qt.RightButton):
+        if btn not in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
             event.ignore()
             return
-        self.setFocus(Qt.MouseFocusReason)
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
         self._press_pos = pos
         self._press_area = area
         self._press_sv = (self.s, self.v)
@@ -892,10 +892,10 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         self._axis_lock = None
         mods = event.modifiers()
         if dlog.is_enabled():
-            dlog.log("PICK_DOWN", area=area, btn=int(btn), x=round(pos.x(), 1),
+            dlog.log("PICK_DOWN", area=area, btn=btn.value, x=round(pos.x(), 1),
                      y=round(pos.y(), 1), h=round(self.h, 3), s=round(self.s, 5),
                      v=round(self.v, 6), lock_l=int(self.lock_l), lock_c=int(self.lock_c),
-                     mods=int(mods))
+                     mods=mods.value)
 
         # T-53 返工：先记下按下瞬间的临时口径（悬停预览可能正开着）；
         # 不锁彩度的动作（abs/s_only/v_only/hue_hsv/未知）整段保持它，其余动作按各自口径重设。
@@ -903,7 +903,7 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         # T-51：新一次按下先清掉上次残留的临时口径；动作解析时再按需设置
         self.set_temp_chroma_mode(None)
         # R14：动作由自定义按键表决定；左键先清掉中/右键留下的临时锁
-        if btn == Qt.LeftButton:
+        if btn == Qt.MouseButton.LeftButton:
             self.btn_l = False
             self.btn_c = False
             self.target_cabs = None
@@ -936,7 +936,7 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
     def mouseMoveEvent(self, event):
         if self._drag_mode is None:
             return
-        pos = event.localPos()
+        pos = event.position()
         # 60Hz 节流：环/轴拖动等重活最多每 14ms 做一次，保证 ≥60fps 手感
         import time as _time
         now = _time.monotonic()

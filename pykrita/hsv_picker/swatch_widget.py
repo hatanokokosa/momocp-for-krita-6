@@ -7,9 +7,9 @@
 色块颜色均为实时值（不是点击前快照）。
 """
 
-from PyQt5.QtCore import QRectF, Qt
-from PyQt5.QtGui import QColor, QFont, QPainter
-from PyQt5.QtWidgets import QApplication, QSizePolicy, QWidget
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QColor, QFont, QPainter
+from PyQt6.QtWidgets import QApplication, QSizePolicy, QWidget
 
 try:                        # 插件内：包内相对导入
     from . import i18n
@@ -54,7 +54,7 @@ class ColorSwatchWidget(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, False)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         font = QFont(self.font())
         font.setPointSizeF(6.5)
         p.setFont(font)
@@ -66,7 +66,7 @@ class ColorSwatchWidget(QWidget):
             fg = QColor(0, 0, 0, 210) if color.lightness() > 128 else QColor(255, 255, 255, 215)
             p.setPen(fg)
             p.drawText(rect.adjusted(4.0, 0.0, -3.0, -1.0),
-                       Qt.AlignLeft | Qt.AlignVCenter, color.name().upper())
+                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, color.name().upper())
 
 
     def _copy(self, color):
@@ -79,11 +79,11 @@ class ColorSwatchWidget(QWidget):
 
     def mousePressEvent(self, event):
         """点色块 = 复制其 HEX。"""
-        if event.button() != Qt.LeftButton:
+        if event.button() != Qt.MouseButton.LeftButton:
             event.ignore()
             return
         for rect, color in self._cells():
-            if rect.contains(event.localPos()):
+            if rect.contains(event.position()):
                 self._copy(color)
                 event.accept()
                 return
@@ -104,9 +104,9 @@ class CurrentColorSwatch(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumWidth(CUR_MIN_W)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(CUR_H)
-        self.setContextMenuPolicy(Qt.NoContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.color = QColor(255, 0, 0)
         self._sync_tip()
 
@@ -143,7 +143,7 @@ class CurrentColorSwatch(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, False)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         if self.color is None:
             p.fillRect(self.rect(), QColor(64, 64, 68))
         else:
@@ -152,7 +152,7 @@ class CurrentColorSwatch(QWidget):
         p.drawRect(0, 0, self.width() - 1, self.height() - 1)
 
     def mousePressEvent(self, event):
-        if event.button() != Qt.LeftButton or self.color is None:
+        if event.button() != Qt.MouseButton.LeftButton or self.color is None:
             event.ignore()
             return
         try:

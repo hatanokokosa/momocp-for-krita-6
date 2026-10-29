@@ -14,17 +14,17 @@
 （会话中途画几笔不写盘，退出后才更新），会话中拿不到，所以下排两格一律取自本插件
 自己的历史列表（实时、无外部依赖）。
 
-窗口特性（Qt5）：
-  · Qt.Tool | FramelessWindowHint | WindowStaysOnTopHint | WindowDoesNotAcceptFocus；
-    WA_ShowWithoutActivating + WA_TransparentForMouseEvents + NoFocus —— 不抢焦点、不吃鼠标、不进任务栏；
+窗口特性（Qt6）：
+  · Wayland：宿主内的鼠标穿透浮层，不依赖全局窗口定位或置顶协议；
+  · 其它后端：关联宿主的无焦点工具窗。
   · show_near(anchor)：默认**紧贴**锚点**右侧**（间隙 0）、顶部对齐，放不下依次翻到 左 -> 下 -> 上，最后夹回屏幕内；
     位置没变就不 move()（面板侧每 150ms 重锚定一次，见 HsvPickerPanel._preview_follow_tick）；
   · hide_after(ms)：单次倒计时（可重置），到点**直接隐藏**（不做淡出动画）；拖动期间应调用 cancel_hide()。
 """
 
-from PyQt5.QtCore import QPoint, QRect, QRectF, Qt, QTimer
-from PyQt5.QtGui import QColor, QPainter
-from PyQt5.QtWidgets import QApplication, QWidget
+from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
+from PyQt6.QtGui import QColor, QGuiApplication, QPainter
+from PyQt6.QtWidgets import QApplication, QWidget
 
 try:                        # 插件内：包内相对导入
     from . import i18n
@@ -55,12 +55,13 @@ class PreviewOverlay(QWidget):
     """三个纯色方块的预览小窗（无文字；常驻对象，反复 show/hide）。"""
 
     def __init__(self, parent=None):
-        flags = (Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-                 | Qt.WindowDoesNotAcceptFocus)
-        super().__init__(parent, flags)
-        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.setFocusPolicy(Qt.NoFocus)
+        self._embedded = QGuiApplication.platformName().startswith("wayland") and parent is not None
+        flags = (Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+                 | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
+        super().__init__(parent, Qt.WindowType.Widget if self._embedded else flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFixedSize(W, H)
         self.setWindowTitle(i18n.t("馍馍拾色器预览", "Momo picker preview"))
         self.current_rgb = None      # 上格：当前选色
@@ -128,26 +129,18 @@ class PreviewOverlay(QWidget):
 
     # ------------------------------------------------------------ 定位
     def screen_geometry(self, point):
-        """包含 point 的屏幕可用区；取不到时退回 QApplication.desktop()（Qt5）。"""
-        screen = None
-        try:
-            screen = QApplication.screenAt(point)
-        except Exception:
-            screen = None
-        if screen is not None:
-            try:
-                return screen.availableGeometry()
-            except Exception:
-                pass
-        try:
-            return QApplication.desktop().availableGeometry()
-        except Exception:
-            return QRect(0, 0, 1920, 1080)
+        """锚点所在屏幕可用区；无匹配屏幕时使用主屏幕。"""
+        screen = QApplication.screenAt(point) or QApplication.primaryScreen()
+        return screen.availableGeometry() if screen is not None else QRect()
 
     def show_near(self, anchor_global_rect, gap=GAP):
         """贴锚点放置：右 -> 左 -> 下 -> 上，最后夹进屏幕可用区；返回落点 (x, y)。"""
         anchor = QRect(anchor_global_rect)
-        avail = self.screen_geometry(anchor.center())
+        if self._embedded:
+            host = self.parentWidget()
+            avail = QRect(host.mapToGlobal(QPoint(0, 0)), host.size())
+        else:
+            avail = self.screen_geometry(anchor.center())
         gap = int(gap)
         w, h = self.width(), self.height()
         if anchor.right() + 1 + gap + w <= avail.right() + 1:
@@ -160,8 +153,11 @@ class PreviewOverlay(QWidget):
             x, y = anchor.left(), anchor.top() - gap - h
         x = max(avail.left(), min(int(x), avail.right() - w + 1))
         y = max(avail.top(), min(int(y), avail.bottom() - h + 1))
-        if self.pos() != QPoint(x, y):
-            self.move(x, y)
+        position = QPoint(x, y)
+        if self._embedded:
+            position = self.parentWidget().mapFromGlobal(position)
+        if self.pos() != position:
+            self.move(position)
         return (x, y)
 
     # ------------------------------------------------------------ 绘制
@@ -176,7 +172,7 @@ class PreviewOverlay(QWidget):
     def paintEvent(self, event):
         """只填三个色块：无文字、无边框、无分隔线（三格直接接壤）。"""
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, False)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         for rect, rgb in self.cell_rects():
             if rgb is None:
                 self._paint_empty(p, rect)

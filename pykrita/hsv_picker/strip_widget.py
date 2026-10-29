@@ -8,9 +8,9 @@
 """
 
 import numpy as np
-from PyQt5.QtCore import QPointF, QRectF, Qt
-from PyQt5.QtGui import QColor, QImage, QPainter, QPen
-from PyQt5.QtWidgets import QWidget
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import QColor, QImage, QPainter, QPen
+from PyQt6.QtWidgets import QWidget
 
 try:
     from . import i18n
@@ -24,8 +24,8 @@ except ImportError:
 STRIP_H = 22
 
 # 键表不支持的 Qt 修饰位（Meta / Keypad / GroupSwitch 等）：出现即落回「无修饰」行
-_UNKNOWN_QT_MODS = (Qt.MetaModifier | Qt.KeypadModifier
-                    | getattr(Qt, "GroupSwitchModifier", 0))
+_UNKNOWN_QT_MODS = (Qt.KeyboardModifier.MetaModifier | Qt.KeyboardModifier.KeypadModifier
+                    | getattr(Qt.KeyboardModifier, "GroupSwitchModifier", Qt.KeyboardModifier(0)))
 
 
 class StripBase(QWidget):
@@ -42,13 +42,13 @@ class StripBase(QWidget):
         self._on_release = on_release
         self.setFixedHeight(STRIP_H)
         self.setMinimumWidth(120)
-        self.setCursor(Qt.SizeHorCursor)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
         self.value = 0.0            # 归一化位置（0=最左，1=最右）
         self._on_changed = on_changed
         self._dragging = False
-        self._press_button = Qt.LeftButton
+        self._press_button = Qt.MouseButton.LeftButton
         self.keymap = kmc.default_keymap()      # 自定义按键表
-        self.setContextMenuPolicy(Qt.NoContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
     def set_keymap(self, keymap):
         """灌入用户自定义按键表（面板持久化后调用）。"""
@@ -56,16 +56,16 @@ class StripBase(QWidget):
 
     @staticmethod
     def _btn_id(btn):
-        if btn == Qt.MiddleButton:
+        if btn == Qt.MouseButton.MiddleButton:
             return "middle"
-        if btn == Qt.RightButton:
+        if btn == Qt.MouseButton.RightButton:
             return "right"
         return "left"
 
     def _action_for(self, btn, mods):
-        mod = kmc.mods_from_bools(bool(mods & Qt.ShiftModifier),
-                                  bool(mods & Qt.ControlModifier),
-                                  bool(mods & Qt.AltModifier),
+        mod = kmc.mods_from_bools(bool(mods & Qt.KeyboardModifier.ShiftModifier),
+                                  bool(mods & Qt.KeyboardModifier.ControlModifier),
+                                  bool(mods & Qt.KeyboardModifier.AltModifier),
                                   bool(mods & _UNKNOWN_QT_MODS))
         return kmc.lookup(self.keymap, self.AREA, self._btn_id(btn), mod)
 
@@ -100,7 +100,7 @@ class StripBase(QWidget):
                 start = i
             prev = i
         spans.append((start, prev))
-        p.setRenderHint(QPainter.Antialiasing, False)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         for a0, b0 in spans:
             x0, x1 = float(a0), float(b0) + 1.0
             p.fillRect(QRectF(x0, 0.0, x1 - x0, float(STRIP_H)), QColor(58, 58, 58, 165))
@@ -114,9 +114,9 @@ class StripBase(QWidget):
     def paintEvent(self, event):
         w = max(2, self.width())
         arr = self.strip_image(w)
-        from PyQt5.QtGui import QImage
+        from PyQt6.QtGui import QImage
         arr = np.ascontiguousarray(arr, dtype=np.uint8)
-        img = QImage(arr.data, w, STRIP_H, w * 3, QImage.Format_RGB888)
+        img = QImage(arr.data, w, STRIP_H, w * 3, QImage.Format.Format_RGB888)
         p = QPainter(self)
         p.drawImage(0, 0, img)
         self._paint_dead(p, w)
@@ -138,7 +138,7 @@ class StripBase(QWidget):
             self._on_changed(self.value)
 
     def mousePressEvent(self, event):
-        if event.button() not in (Qt.LeftButton, Qt.MiddleButton, Qt.RightButton):
+        if event.button() not in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
             event.ignore()
             return
         if self._action_for(event.button(), event.modifiers()) == "none":
@@ -148,12 +148,12 @@ class StripBase(QWidget):
         self._press_button = event.button()
         if self._on_press is not None:
             self._on_press()
-        self._apply(event.localPos())
+        self._apply(event.position())
         event.accept()
 
     def mouseMoveEvent(self, event):
         if self._dragging and (event.buttons() & self._press_button):
-            self._apply(event.localPos())
+            self._apply(event.position())
             event.accept()
 
     def mouseReleaseEvent(self, event):
